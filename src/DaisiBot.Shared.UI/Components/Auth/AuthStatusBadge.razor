@@ -1,0 +1,40 @@
+@inject IAuthService AuthService
+@implements IDisposable
+
+@if (_authState?.IsAuthenticated == true)
+{
+    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.Person">
+        @_authState.UserName
+    </MudChip>
+    <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" Size="Size.Small"
+                   OnClick="OnLogout" aria-label="Logout" />
+}
+
+@code {
+    [Parameter] public EventCallback OnLogoutCompleted { get; set; }
+
+    private AuthState? _authState;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _authState = await AuthService.GetAuthStateAsync();
+        AuthService.AuthStateChanged += OnAuthChanged;
+    }
+
+    private void OnAuthChanged(object? sender, AuthState state)
+    {
+        _authState = state;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLogout()
+    {
+        await AuthService.LogoutAsync();
+        await OnLogoutCompleted.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        AuthService.AuthStateChanged -= OnAuthChanged;
+    }
+}

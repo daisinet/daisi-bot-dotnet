@@ -1,0 +1,81 @@
+@page "/my-skills"
+@inject ISkillService SkillService
+@inject NavigationManager Navigation
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="font-accent" style="color: white;">My Skills</h1>
+    <a href="/my-skills/new" class="btn btn-accent">Create New Skill</a>
+</div>
+
+@if (_skills.Count == 0)
+{
+    <div class="glass-card text-center py-5">
+        <p class="text-muted">You haven't created any skills yet.</p>
+        <a href="/my-skills/new" class="btn btn-accent">Create Your First Skill</a>
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-dark table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Visibility</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var skill in _skills)
+                {
+                    <tr>
+                        <td>@skill.Name</td>
+                        <td>@skill.Version</td>
+                        <td>
+                            <span class="badge @GetStatusBadgeClass(skill.Status)">@skill.Status</span>
+                        </td>
+                        <td>@skill.Visibility</td>
+                        <td>@skill.CreatedAt.ToString("MMM d, yyyy")</td>
+                        <td>
+                            <a href="/my-skills/@skill.Id/edit" class="btn btn-sm btn-outline-light">Edit</a>
+                            @if (skill.Status is SkillStatus.Draft or SkillStatus.Rejected && skill.Visibility == SkillVisibility.Public)
+                            {
+                                <button class="btn btn-sm btn-outline-warning ms-1" @onclick="@(() => SubmitForReview(skill.Id))">
+                                    Submit for Review
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Skill> _skills = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // TODO: Get accountId from auth state
+        _skills = await SkillService.GetMySkillsAsync("current-account");
+    }
+
+    private async Task SubmitForReview(string skillId)
+    {
+        await SkillService.SubmitForReviewAsync(skillId);
+        _skills = await SkillService.GetMySkillsAsync("current-account");
+    }
+
+    private static string GetStatusBadgeClass(SkillStatus status) => status switch
+    {
+        SkillStatus.Draft => "bg-secondary",
+        SkillStatus.PendingReview => "bg-warning text-dark",
+        SkillStatus.Approved => "bg-success",
+        SkillStatus.Rejected => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

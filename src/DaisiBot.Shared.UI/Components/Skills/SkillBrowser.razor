@@ -1,0 +1,99 @@
+@inject ISkillService SkillService
+
+<div class="skill-browser">
+    <div class="d-flex align-center mb-4">
+        <MudTextField @bind-Value="_searchQuery" Label="Search skills..." Variant="Variant.Outlined"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="SearchAsync"
+                      Class="flex-grow-1 mr-3" />
+        <MudSelect T="string" @bind-Value="_selectedTag" Label="Category" Variant="Variant.Outlined" Style="min-width: 200px;">
+            <MudSelectItem Value="@((string?)null)">All Categories</MudSelectItem>
+            @foreach (var tag in _availableTags)
+            {
+                <MudSelectItem Value="@tag">@tag</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+
+    <MudGrid>
+        @foreach (var skill in _skills)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <SkillCard Skill="skill"
+                           IsInstalled="_installedIds.Contains(skill.Id)"
+                           OnInstall="OnInstallSkill"
+                           OnUninstall="OnUninstallSkill"
+                           OnViewDetail="OnViewDetail"
+                           OnTagClick="OnTagSelected" />
+            </MudItem>
+        }
+    </MudGrid>
+
+    @if (!_loading && _skills.Count == 0)
+    {
+        <MudText Typo="Typo.body1" Align="Align.Center" Class="mt-8 mud-text-secondary">
+            No skills found. Try a different search.
+        </MudText>
+    }
+</div>
+
+@code {
+    [Parameter] public string? AccountId { get; set; }
+    [Parameter] public EventCallback<string> OnSkillSelected { get; set; }
+
+    private string? _searchQuery;
+    private string? _selectedTag;
+    private List<Skill> _skills = [];
+    private HashSet<string> _installedIds = [];
+    private bool _loading;
+
+    private readonly string[] _availableTags = ["productivity", "coding", "research", "writing", "creative", "data", "communication"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SearchAsync();
+        if (!string.IsNullOrEmpty(AccountId))
+        {
+            var installed = await SkillService.GetInstalledSkillsAsync(AccountId);
+            _installedIds = installed.Select(i => i.SkillId).ToHashSet();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        _skills = await SkillService.GetPublicSkillsAsync(_searchQuery, _selectedTag);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task OnInstallSkill(string skillId)
+    {
+        if (string.IsNullOrEmpty(AccountId)) return;
+        await SkillService.InstallSkillAsync(AccountId, skillId);
+        _installedIds.Add(skillId);
+    }
+
+    private async Task OnUninstallSkill(string skillId)
+    {
+        if (string.IsNullOrEmpty(AccountId)) return;
+        await SkillService.UninstallSkillAsync(AccountId, skillId);
+        _installedIds.Remove(skillId);
+    }
+
+    private async Task OnViewDetail(string skillId) => await OnSkillSelected.InvokeAsync(skillId);
+
+    private async Task OnTagSelected(string tag)
+    {
+        _selectedTag = tag;
+        await SearchAsync();
+    }
+}

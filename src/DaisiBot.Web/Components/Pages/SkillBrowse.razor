@@ -1,0 +1,80 @@
+@page "/skills"
+@inject ISkillService SkillService
+@inject NavigationManager Navigation
+
+<h1 class="font-accent mb-4" style="color: white;">Skill Marketplace</h1>
+
+<div class="d-flex gap-3 mb-4">
+    <MudTextField @bind-Value="_searchQuery" Label="Search skills..." Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="SearchAsync"
+                  Style="flex: 1;" />
+    <MudSelect T="string" @bind-Value="_selectedTag" Label="Category" Variant="Variant.Outlined" Style="min-width: 200px;">
+        <MudSelectItem T="string" Value="@((string?)null)">All Categories</MudSelectItem>
+        @foreach (var tag in _tags)
+        {
+            <MudSelectItem T="string" Value="@tag">@tag</MudSelectItem>
+        }
+    </MudSelect>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+
+<div class="skill-grid">
+    @foreach (var skill in _skills)
+    {
+        <div class="glass-card" @onclick="@(() => Navigation.NavigateTo($"/skills/{skill.Id}"))">
+            <h4 style="color: white;">@skill.Name</h4>
+            <p class="text-muted mb-1">v@(skill.Version) by @skill.Author</p>
+            <p>@skill.ShortDescription</p>
+            <div class="d-flex flex-wrap gap-1 mb-2">
+                @foreach (var tag in skill.Tags)
+                {
+                    <span class="badge bg-secondary">@tag</span>
+                }
+            </div>
+            <div class="d-flex flex-wrap gap-1 mb-2">
+                @foreach (var group in skill.RequiredToolGroups)
+                {
+                    var badgeClass = ToolPermissions.IsElevated(group) ? "badge-elevated" : "badge-standard";
+                    <span class="badge @badgeClass">@group</span>
+                }
+            </div>
+            <small class="text-muted">@skill.DownloadCount downloads</small>
+        </div>
+    }
+</div>
+
+@if (!_loading && _skills.Count == 0)
+{
+    <div class="text-center py-5">
+        <p class="text-muted">No skills found. Try different search terms.</p>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery] public string? Tag { get; set; }
+
+    private string? _searchQuery;
+    private string? _selectedTag;
+    private List<Skill> _skills = [];
+    private bool _loading;
+    private readonly string[] _tags = ["productivity", "coding", "research", "writing", "creative", "data", "communication"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _selectedTag = Tag;
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _skills = await SkillService.GetPublicSkillsAsync(_searchQuery, _selectedTag);
+        _loading = false;
+    }
+}

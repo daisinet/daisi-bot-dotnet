@@ -1,0 +1,85 @@
+@inject ISkillService SkillService
+
+@if (_skill is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-6" Elevation="2">
+        <div class="d-flex align-center mb-4">
+            <MudAvatar Color="Color.Primary" Size="Size.Large" Class="mr-3">
+                <MudIcon Icon="@Icons.Material.Filled.Extension" />
+            </MudAvatar>
+            <div>
+                <MudText Typo="Typo.h5">@_skill.Name</MudText>
+                <MudText Typo="Typo.subtitle1" Class="mud-text-secondary">
+                    v@(_skill.Version) by @_skill.Author
+                </MudText>
+            </div>
+            <MudSpacer />
+            @if (ShowInstallButton)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           OnClick="OnInstallClick">
+                    @(IsInstalled ? "Uninstall" : "Install")
+                </MudButton>
+            }
+        </div>
+
+        <MudDivider Class="mb-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Tags</MudText>
+        <div class="d-flex flex-wrap gap-1 mb-4">
+            @foreach (var tag in _skill.Tags)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+            }
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Required Permissions</MudText>
+        <div class="mb-4">
+            @foreach (var group in _skill.RequiredToolGroups)
+            {
+                var level = ToolPermissions.GetPermissionLevel(group);
+                var desc = ToolPermissions.GetDescription(group);
+                var color = level == ToolPermissionLevel.Elevated ? Color.Warning : Color.Default;
+
+                <MudAlert Severity="@(level == ToolPermissionLevel.Elevated ? Severity.Warning : Severity.Info)"
+                          Class="mb-2" Dense="true">
+                    <strong>@group</strong> (@level) - @desc
+                </MudAlert>
+            }
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Description</MudText>
+        <MarkdownRenderer Content="@_skill.Description" />
+
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            @_skill.DownloadCount downloads | Created @_skill.CreatedAt.ToString("MMM d, yyyy")
+        </MudText>
+    </MudPaper>
+}
+
+@code {
+    [Parameter, EditorRequired] public string SkillId { get; set; } = string.Empty;
+    [Parameter] public bool ShowInstallButton { get; set; } = true;
+    [Parameter] public bool IsInstalled { get; set; }
+    [Parameter] public EventCallback<string> OnInstallRequested { get; set; }
+
+    private Skill? _skill;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(SkillId))
+        {
+            _skill = await SkillService.GetSkillAsync(SkillId);
+        }
+    }
+
+    private async Task OnInstallClick()
+    {
+        await OnInstallRequested.InvokeAsync(SkillId);
+    }
+}

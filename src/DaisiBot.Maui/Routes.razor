@@ -1,0 +1,13 @@
+@using DaisiBot.Shared.UI.Components.Layout
+
+<Router AppAssembly="typeof(Routes).Assembly"
+        AdditionalAssemblies="new[] { typeof(DaisiBot.Shared.UI._Imports).Assembly }">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="typeof(MainLayout)" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(MainLayout)">
+            <MudText Typo="Typo.h6">Page not found</MudText>
+        </LayoutView>
+    </NotFound>
+</Router>

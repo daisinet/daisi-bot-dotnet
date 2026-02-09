@@ -1,0 +1,109 @@
+@inject IChatService ChatService
+@inject IConversationStore ConversationStore
+@inject ISettingsService SettingsService
+@implements IDisposable
+
+<div class="chat-panel d-flex flex-column" style="height: 100%;">
+    <div class="chat-messages flex-grow-1 overflow-auto pa-3" @ref="_messageContainer">
+        @if (_conversation is not null)
+        {
+            @foreach (var msg in _conversation.Messages)
+            {
+                <ChatMessageBubble Message="msg" />
+            }
+        }
+
+        @if (_isStreaming)
+        {
+            <StreamingMessage Content="@_streamContent" Type="@_streamType" />
+        }
+    </div>
+
+    <ChatStatsBar Stats="_stats" />
+
+    <ChatInput OnSend="OnSendMessage" OnStop="OnStopGeneration" IsStreaming="_isStreaming" />
+</div>
+
+@code {
+    [Parameter] public Guid? ConversationId { get; set; }
+
+    private Conversation? _conversation;
+    private string _streamContent = string.Empty;
+    private string _streamType = "Text";
+    private bool _isStreaming;
+    private ChatStats _stats = new();
+    private ElementReference _messageContainer;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ConversationId.HasValue)
+        {
+            _conversation = await ConversationStore.GetAsync(ConversationId.Value);
+            StateHasChanged();
+        }
+    }
+
+    [Parameter] public EventCallback<Guid> OnConversationCreated { get; set; }
+
+    private async Task OnSendMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+
+        if (_conversation is null)
+        {
+            _conversation = new Conversation { Title = message.Length > 50 ? message[..50] + "..." : message };
+            _conversation = await ConversationStore.CreateAsync(_conversation);
+            await OnConversationCreated.InvokeAsync(_conversation.Id);
+        }
+
+        _isStreaming = true;
+        _streamContent = string.Empty;
+        _cts = new CancellationTokenSource();
+
+        var settings = await SettingsService.GetSettingsAsync();
+        var config = new AgentConfig
+        {
+            ModelName = !string.IsNullOrWhiteSpace(_conversation.ModelName) ? _conversation.ModelName : settings.DefaultModelName,
+            InitializationPrompt = _conversation.SystemPrompt,
+            ThinkLevel = _conversation.ThinkLevel,
+            Temperature = settings.Temperature,
+            TopP = settings.TopP,
+            MaxTokens = settings.MaxTokens,
+            EnabledToolGroups = settings.GetEnabledToolGroups()
+        };
+
+        try
+        {
+            await foreach (var chunk in ChatService.SendMessageAsync(_conversation.Id, message, config, _cts.Token))
+            {
+                if (chunk.IsComplete) break;
+                _streamContent += chunk.Content;
+                _streamType = chunk.Type;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            _stats = await ChatService.GetCurrentStatsAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _streamContent += $"\n[Error: {ex.Message}]";
+        }
+
+        _isStreaming = false;
+        _conversation = await ConversationStore.GetAsync(_conversation.Id);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnStopGeneration()
+    {
+        _cts?.Cancel();
+        await ChatService.StopGenerationAsync();
+    }
+
+    public void Dispose()
+    {
+        _cts?.Dispose();
+    }
+}

@@ -1,0 +1,56 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider IsDarkMode="true" Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="web-layout">
+    <nav class="navbar navbar-dark glass-nav">
+        <div class="container">
+            <a class="navbar-brand font-accent" href="/">
+                <span class="text-accent">Daisi</span> Bot
+            </a>
+            <div class="d-flex gap-3 align-items-center">
+                <a href="/skills" class="nav-link text-light">Skills</a>
+                <a href="/my-skills" class="nav-link text-light">My Skills</a>
+                <a href="/installed" class="nav-link text-light">Installed</a>
+                <a href="/login" class="nav-link text-light">Login</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container py-5">
+        @Body
+    </main>
+
+    <footer class="glass-footer py-4 mt-5">
+        <div class="container text-center">
+            <p class="text-muted mb-0">Daisi Bot Skill Marketplace &copy; @DateTime.Now.Year Distributed AI Systems, Inc.</p>
+        </div>
+    </footer>
+</div>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#f78c1d",
+            Secondary = "#1B1B1B",
+            Background = "#000000",
+            Surface = "#1B1B1B",
+            AppbarBackground = "#0a0a0a"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["DM Sans", "sans-serif"]
+            },
+            H1 = new H1Typography { FontFamily = ["Anta", "system-ui"] },
+            H2 = new H2Typography { FontFamily = ["Anta", "system-ui"] },
+            H3 = new H3Typography { FontFamily = ["Anta", "system-ui"] }
+        }
+    };
+}

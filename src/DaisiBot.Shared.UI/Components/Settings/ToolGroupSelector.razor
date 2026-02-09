@@ -1,0 +1,55 @@
+@inject IDialogService DialogService
+
+<MudText Typo="Typo.subtitle2" Class="mb-2">Tool Groups</MudText>
+<MudText Typo="Typo.caption" Class="mb-3 mud-text-secondary">
+    Enable tool groups for the AI agent. Elevated permissions require confirmation.
+</MudText>
+
+@foreach (var group in Enum.GetValues<ToolGroupSelection>())
+{
+    var isEnabled = EnabledGroups.Contains(group);
+    var isElevated = ToolPermissions.IsElevated(group);
+    var description = ToolPermissions.GetDescription(group);
+
+    <div class="d-flex align-center mb-2">
+        <MudCheckBox T="bool" Value="isEnabled" ValueChanged="@(v => OnToggle(group, v))" Color="Color.Primary" />
+        <div>
+            <MudText Typo="Typo.body2">
+                @group.ToString()
+                @if (isElevated)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-1">Elevated</MudChip>
+                }
+            </MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@description</MudText>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<ToolGroupSelection> EnabledGroups { get; set; } = [];
+    [Parameter] public EventCallback<List<ToolGroupSelection>> EnabledGroupsChanged { get; set; }
+
+    private async Task OnToggle(ToolGroupSelection group, bool enabled)
+    {
+        if (enabled && ToolPermissions.IsElevated(group))
+        {
+            var desc = ToolPermissions.GetDescription(group);
+            var result = await DialogService.ShowMessageBox(
+                "Elevated Permission Required",
+                $"'{group}' requires elevated access:\n\n{desc}\n\nDo you want to enable this?",
+                yesText: "Allow", cancelText: "Deny");
+
+            if (result != true) return;
+        }
+
+        var updated = new List<ToolGroupSelection>(EnabledGroups);
+        if (enabled && !updated.Contains(group))
+            updated.Add(group);
+        else if (!enabled)
+            updated.Remove(group);
+
+        EnabledGroups = updated;
+        await EnabledGroupsChanged.InvokeAsync(updated);
+    }
+}

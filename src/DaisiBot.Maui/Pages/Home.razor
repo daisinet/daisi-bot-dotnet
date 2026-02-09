@@ -1,0 +1,28 @@
+@page "/"
+@inject ChatNavigationState ChatNav
+@implements IDisposable
+
+<ChatPanel ConversationId="ChatNav.CurrentConversationId"
+           OnConversationCreated="OnConversationCreated" />
+
+@code {
+    protected override void OnInitialized()
+    {
+        ChatNav.Changed += OnNavChanged;
+    }
+
+    private void OnConversationCreated(Guid id)
+    {
+        ChatNav.SelectConversation(id);
+    }
+
+    private void OnNavChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ChatNav.Changed -= OnNavChanged;
+    }
+}

@@ -1,0 +1,60 @@
+@inject ISettingsService SettingsService
+
+<MudDialog Style="max-width: 600px;">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Settings</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTabs Elevation="0" Rounded="true" PanelClass="pa-3">
+            <MudTabPanel Text="Inference">
+                <MudNumericField @bind-Value="_settings.Temperature" Label="Temperature" Min="0" Max="2" Step="0.1f" Class="mb-3" />
+                <MudNumericField @bind-Value="_settings.TopP" Label="Top P" Min="0" Max="1" Step="0.05f" Class="mb-3" />
+                <MudNumericField @bind-Value="_settings.MaxTokens" Label="Max Tokens" Min="256" Max="128000" Step="1024" Class="mb-3" />
+                <ModelPicker />
+                <ThinkLevelSelector @bind-Value="_settings.DefaultThinkLevel" />
+            </MudTabPanel>
+
+            <MudTabPanel Text="Connection">
+                <MudTextField @bind-Value="_settings.OrcDomain" Label="Orc Domain" Class="mb-3" />
+                <MudNumericField @bind-Value="_settings.OrcPort" Label="Orc Port" Class="mb-3" />
+                <MudSwitch @bind-Value="_settings.OrcUseSsl" Label="Use SSL" Color="Color.Primary" />
+                <MudTextField @bind-Value="_settings.NetworkName" Label="Network" Class="mb-3" />
+            </MudTabPanel>
+
+            <MudTabPanel Text="System Prompt">
+                <MudTextField @bind-Value="_settings.SystemPrompt" Label="System Prompt" Lines="8"
+                              Variant="Variant.Outlined" FullWidth="true" />
+            </MudTabPanel>
+
+            <MudTabPanel Text="Tools">
+                <ToolGroupSelector @bind-EnabledGroups="_enabledGroups" />
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private UserSettings _settings = new();
+    private List<ToolGroupSelection> _enabledGroups = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.GetSettingsAsync();
+        _enabledGroups = _settings.GetEnabledToolGroups();
+    }
+
+    private async Task Save()
+    {
+        _settings.SetEnabledToolGroups(_enabledGroups);
+        await SettingsService.SaveSettingsAsync(_settings);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

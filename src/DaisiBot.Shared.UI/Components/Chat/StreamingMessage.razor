@@ -1,0 +1,33 @@
+<div class="d-flex mb-3 justify-start">
+    <MudPaper Class="pa-3" Elevation="1" Style="max-width: 80%;">
+        <div class="d-flex align-center mb-1">
+            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Class="mr-1" />
+            <MudText Typo="Typo.caption">Bot</MudText>
+            @if (Type == "Thinking")
+            {
+                <ThinkingIndicator />
+            }
+        </div>
+
+        @if (string.IsNullOrEmpty(Content))
+        {
+            <ThinkingIndicator />
+        }
+        else
+        {
+            <MarkdownRenderer Content="@Content" />
+        }
+
+        @if (Type == "Tooling")
+        {
+            <MudChip T="string" Color="Color.Info" Size="Size.Small" Icon="@Icons.Material.Filled.Build" Class="mt-1">
+                Using tools...
+            </MudChip>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    [Parameter] public string Content { get; set; } = string.Empty;
+    [Parameter] public string Type { get; set; } = "Text";
+}

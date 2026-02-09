@@ -1,0 +1,45 @@
+@inject IConversationStore ConversationStore
+
+<MudNavMenu Dense="true">
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Chat">Chat</MudNavLink>
+    <MudNavLink Href="/skills" Icon="@Icons.Material.Filled.Extension">Skills</MudNavLink>
+    <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+</MudNavMenu>
+
+<MudDivider Class="my-2" />
+
+<div class="px-3 d-flex justify-space-between align-center mb-2">
+    <MudText Typo="Typo.subtitle2">Conversations</MudText>
+    <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="OnNewConversation" />
+</div>
+
+<MudNavMenu Dense="true" Class="conversation-list">
+    @foreach (var conv in _conversations)
+    {
+        <MudNavLink OnClick="@(() => OnConversationClick(conv.Id))">
+            <MudText Typo="Typo.body2" Class="text-truncate">@conv.Title</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@conv.UpdatedAt.ToLocalTime().ToString("MMM d, HH:mm")</MudText>
+        </MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    [Parameter] public EventCallback<Guid> OnConversationSelected { get; set; }
+    [Parameter] public EventCallback OnNewConversationRequested { get; set; }
+
+    private List<Conversation> _conversations = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    public async Task RefreshAsync()
+    {
+        _conversations = await ConversationStore.GetAllAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnConversationClick(Guid id) => await OnConversationSelected.InvokeAsync(id);
+    private async Task OnNewConversation() => await OnNewConversationRequested.InvokeAsync();
+}

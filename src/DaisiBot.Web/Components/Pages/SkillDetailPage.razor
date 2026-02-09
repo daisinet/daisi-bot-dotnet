@@ -1,0 +1,62 @@
+@page "/skills/{Id}"
+@inject ISkillService SkillService
+
+@if (_skill is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <div class="glass-card">
+        <div class="d-flex align-items-center mb-4">
+            <div class="flex-grow-1">
+                <h1 class="font-accent" style="color: white;">@_skill.Name</h1>
+                <p class="text-muted">v@(_skill.Version) by @_skill.Author | @_skill.DownloadCount downloads</p>
+            </div>
+            <button class="btn btn-accent btn-lg" @onclick="OnInstall">Install</button>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mb-4">
+            @foreach (var tag in _skill.Tags)
+            {
+                <span class="badge bg-secondary">@tag</span>
+            }
+        </div>
+
+        <h3 class="font-accent mb-3" style="color: white;">Required Permissions</h3>
+        @foreach (var group in _skill.RequiredToolGroups)
+        {
+            var isElevated = ToolPermissions.IsElevated(group);
+            var desc = ToolPermissions.GetDescription(group);
+            <div class="glass-card mb-2" style="padding: 1rem; border-radius: 12px;">
+                <div class="d-flex align-items-center">
+                    <span class="badge @(isElevated ? "badge-elevated" : "badge-standard") me-2">@(isElevated ? "Elevated" : "Standard")</span>
+                    <strong style="color: white;">@group</strong>
+                </div>
+                <p class="text-muted mb-0 mt-1">@desc</p>
+            </div>
+        }
+
+        <h3 class="font-accent mt-4 mb-3" style="color: white;">Description</h3>
+        <MarkdownRenderer Content="@_skill.Description" />
+
+        <hr style="border-color: var(--divider-color);" />
+        <small class="text-muted">Created @_skill.CreatedAt.ToString("MMM d, yyyy")</small>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private Skill? _skill;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _skill = await SkillService.GetSkillAsync(Id);
+    }
+
+    private async Task OnInstall()
+    {
+        // TODO: Require login, then install
+    }
+}

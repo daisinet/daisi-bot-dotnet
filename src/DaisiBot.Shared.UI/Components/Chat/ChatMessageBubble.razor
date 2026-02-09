@@ -1,0 +1,62 @@
+@using Markdig
+
+<div class="d-flex mb-3 @(IsUser ? "justify-end" : "justify-start")">
+    <MudPaper Class="@PaperClass" Elevation="1" Style="max-width: 80%;">
+        <div class="d-flex align-center mb-1">
+            <MudIcon Icon="@RoleIcon" Size="Size.Small" Class="mr-1" />
+            <MudText Typo="Typo.caption" Color="Color.Default">
+                @RoleLabel
+            </MudText>
+            <MudSpacer />
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @Message.Timestamp.ToLocalTime().ToString("HH:mm")
+            </MudText>
+        </div>
+
+        @if (Message.Type == ChatMessageType.Thinking)
+        {
+            <MudText Typo="Typo.body2" Style="font-style: italic; opacity: 0.7;">
+                @Message.Content
+            </MudText>
+        }
+        else
+        {
+            <MarkdownRenderer Content="@Message.Content" />
+        }
+
+        @if (Message.Role == ChatRole.Assistant && Message.TokenCount > 0)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+                @Message.TokenCount tok | @Message.TokensPerSecond.ToString("F1") t/s | @Message.ComputeTimeMs.ToString("F0")ms
+            </MudText>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = default!;
+
+    private bool IsUser => Message.Role == ChatRole.User;
+
+    private string PaperClass => IsUser
+        ? "pa-3 mud-theme-primary"
+        : Message.Type == ChatMessageType.Thinking
+            ? "pa-3 mud-theme-dark"
+            : "pa-3";
+
+    private string RoleIcon => Message.Role switch
+    {
+        ChatRole.User => Icons.Material.Filled.Person,
+        ChatRole.Assistant => Icons.Material.Filled.SmartToy,
+        ChatRole.Tool => Icons.Material.Filled.Build,
+        _ => Icons.Material.Filled.Info
+    };
+
+    private string RoleLabel => Message.Role switch
+    {
+        ChatRole.User => "You",
+        ChatRole.Assistant => "Bot",
+        ChatRole.Tool => "Tool",
+        _ => Message.Role.ToString()
+    };
+}

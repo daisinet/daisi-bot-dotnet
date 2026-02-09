@@ -1,0 +1,121 @@
+@inject ISkillService SkillService
+
+<MudPaper Class="pa-6" Elevation="2">
+    <MudText Typo="Typo.h6" Class="mb-4">@(IsEdit ? "Edit Skill" : "Create New Skill")</MudText>
+
+    <MudTextField @bind-Value="_skill.Name" Label="Skill Name" Required="true" Class="mb-3" />
+    <MudTextField @bind-Value="_skill.ShortDescription" Label="Short Description" Counter="120" MaxLength="120" Class="mb-3" />
+    <MudTextField @bind-Value="_skill.Version" Label="Version" Class="mb-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Description (Markdown)</MudText>
+    <MudTextField @bind-Value="_skill.Description" Lines="8" Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Tags (comma separated)</MudText>
+    <MudTextField @bind-Value="_tagString" Label="Add tags..." Placeholder="coding, productivity, research" Class="mb-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Required Tool Groups</MudText>
+    @foreach (var group in Enum.GetValues<ToolGroupSelection>())
+    {
+        var isSelected = _selectedToolGroups.Contains(group);
+        var isElevated = ToolPermissions.IsElevated(group);
+        <MudCheckBox T="bool" Value="isSelected" ValueChanged="@(v => ToggleToolGroup(group, v))" Label="@group.ToString()"
+                     Color="@(isElevated ? Color.Warning : Color.Primary)" />
+    }
+
+    <MudDivider Class="my-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">System Prompt Template</MudText>
+    <MudTextField @bind-Value="_skill.SystemPromptTemplate" Lines="6" Variant="Variant.Outlined"
+                  FullWidth="true" Placeholder="The prompt injected when this skill is active..." Class="mb-3" />
+
+    <MudSelect T="SkillVisibility" @bind-Value="_skill.Visibility" Label="Visibility" Class="mb-3">
+        <MudSelectItem Value="SkillVisibility.Private">Private (your account only)</MudSelectItem>
+        <MudSelectItem Value="SkillVisibility.Public">Public (requires approval)</MudSelectItem>
+    </MudSelect>
+
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+            Save
+        </MudButton>
+        @if (IsEdit && _skill.Status is SkillStatus.Draft or SkillStatus.Rejected && _skill.Visibility == SkillVisibility.Public)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="SubmitForReviewAsync">
+                Submit for Review
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Text" OnClick="@(() => OnCancel.InvokeAsync())">Cancel</MudButton>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public Skill? ExistingSkill { get; set; }
+    [Parameter] public string AccountId { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool IsEdit => ExistingSkill is not null;
+    private Skill _skill = new();
+    private string _tagString = string.Empty;
+    private HashSet<ToolGroupSelection> _selectedToolGroups = [];
+    private bool _saving;
+    private string _error = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        if (ExistingSkill is not null)
+        {
+            _skill = ExistingSkill;
+            _tagString = string.Join(", ", ExistingSkill.Tags);
+            _selectedToolGroups = new HashSet<ToolGroupSelection>(ExistingSkill.RequiredToolGroups);
+        }
+    }
+
+    private void ToggleToolGroup(ToolGroupSelection group, bool enabled)
+    {
+        if (enabled) _selectedToolGroups.Add(group);
+        else _selectedToolGroups.Remove(group);
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            _skill.Tags = _tagString.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            _skill.RequiredToolGroups = _selectedToolGroups.ToList();
+            _skill.AccountId = AccountId;
+
+            if (IsEdit)
+                await SkillService.UpdateSkillAsync(_skill);
+            else
+                await SkillService.CreateSkillAsync(_skill);
+
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _saving = false;
+    }
+
+    private async Task SubmitForReviewAsync()
+    {
+        try
+        {
+            await SkillService.SubmitForReviewAsync(_skill.Id);
+            _skill.Status = SkillStatus.PendingReview;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

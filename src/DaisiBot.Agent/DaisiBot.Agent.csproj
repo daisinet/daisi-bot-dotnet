@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DaisiBot.Core\DaisiBot.Core.csproj" />
+    <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.SDK\Daisi.SDK.csproj" />
+  </ItemGroup>
+
+</Project>

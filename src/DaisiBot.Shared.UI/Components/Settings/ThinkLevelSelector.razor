@@ -1,0 +1,12 @@
+<MudRadioGroup @bind-Value="Value" T="ConversationThinkLevel">
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Think Level</MudText>
+    <MudRadio Value="ConversationThinkLevel.Basic" Color="Color.Primary">Basic</MudRadio>
+    <MudRadio Value="ConversationThinkLevel.BasicWithTools" Color="Color.Primary">Basic + Tools</MudRadio>
+    <MudRadio Value="ConversationThinkLevel.ChainOfThought" Color="Color.Secondary">Chain of Thought</MudRadio>
+    <MudRadio Value="ConversationThinkLevel.TreeOfThought" Color="Color.Tertiary">Tree of Thought</MudRadio>
+</MudRadioGroup>
+
+@code {
+    [Parameter] public ConversationThinkLevel Value { get; set; }
+    [Parameter] public EventCallback<ConversationThinkLevel> ValueChanged { get; set; }
+}

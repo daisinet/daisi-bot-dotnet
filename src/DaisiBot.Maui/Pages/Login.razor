@@ -1,0 +1,109 @@
+@page "/login"
+@layout EmptyLayout
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<MudThemeProvider IsDarkMode="true" />
+
+<div class="d-flex justify-center align-center" style="height: 100vh;">
+    <MudPaper Elevation="4" Class="pa-8" Style="width: 400px;">
+        <MudText Typo="Typo.h4" Align="Align.Center" Class="mb-6">Daisi Bot</MudText>
+        <MudText Typo="Typo.h6" Align="Align.Center" Class="mb-4">Sign In</MudText>
+
+        @if (!_codeSent)
+        {
+            <MudTextField @bind-Value="_emailOrPhone" Label="Email or Phone" Variant="Variant.Outlined"
+                          FullWidth="true" Class="mb-4" OnKeyDown="OnEmailKeyDown" />
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+            }
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+                       OnClick="SendCode" Disabled="_loading">
+                @if (_loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Send Code
+            </MudButton>
+        }
+        else
+        {
+            <MudText Class="mb-4" Align="Align.Center">A verification code was sent to @_emailOrPhone</MudText>
+            <MudTextField @bind-Value="_authCode" Label="Verification Code" Variant="Variant.Outlined"
+                          FullWidth="true" Class="mb-4" OnKeyDown="OnCodeKeyDown" />
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+            }
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+                       OnClick="Verify" Disabled="_loading">
+                @if (_loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Verify
+            </MudButton>
+            <MudButton Variant="Variant.Text" FullWidth="true" Class="mt-2"
+                       OnClick="@(() => { _codeSent = false; _error = string.Empty; })">
+                Back
+            </MudButton>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private string _emailOrPhone = string.Empty;
+    private string _authCode = string.Empty;
+    private string _error = string.Empty;
+    private bool _codeSent;
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthService.GetAuthStateAsync();
+        if (state.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+
+    private async Task OnEmailKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SendCode();
+    }
+
+    private async Task OnCodeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Verify();
+    }
+
+    private async Task SendCode()
+    {
+        if (string.IsNullOrWhiteSpace(_emailOrPhone)) return;
+        _loading = true;
+        _error = string.Empty;
+        try
+        {
+            var success = await AuthService.SendAuthCodeAsync(_emailOrPhone);
+            _codeSent = success;
+            if (!success) _error = "Failed to send code.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _loading = false;
+    }
+
+    private async Task Verify()
+    {
+        if (string.IsNullOrWhiteSpace(_authCode)) return;
+        _loading = true;
+        _error = string.Empty;
+        try
+        {
+            await AuthService.ValidateAuthCodeAsync(_emailOrPhone, _authCode);
+            Navigation.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _loading = false;
+    }
+}

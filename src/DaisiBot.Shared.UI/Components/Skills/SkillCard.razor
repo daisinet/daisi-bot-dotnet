@@ -1,0 +1,72 @@
+<MudCard Elevation="2" Class="mb-3 skill-card">
+    <MudCardHeader>
+        <CardHeaderAvatar>
+            @if (!string.IsNullOrEmpty(Skill.IconUrl))
+            {
+                <MudAvatar Src="@Skill.IconUrl" Size="Size.Medium" />
+            }
+            else
+            {
+                <MudAvatar Color="Color.Primary" Size="Size.Medium">
+                    <MudIcon Icon="@Icons.Material.Filled.Extension" />
+                </MudAvatar>
+            }
+        </CardHeaderAvatar>
+        <CardHeaderContent>
+            <MudText Typo="Typo.subtitle1">@Skill.Name</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                v@(Skill.Version) by @Skill.Author
+            </MudText>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            @if (ShowInstallButton)
+            {
+                @if (IsInstalled)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => OnUninstall.InvokeAsync(Skill.Id))">Uninstall</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               OnClick="@(() => OnInstall.InvokeAsync(Skill.Id))">Install</MudButton>
+                }
+            }
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudText Typo="Typo.body2" Class="mb-2">@Skill.ShortDescription</MudText>
+        <div class="d-flex flex-wrap gap-1 mb-2">
+            @foreach (var tag in Skill.Tags)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OnTagClick.InvokeAsync(tag))">@tag</MudChip>
+            }
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var group in Skill.RequiredToolGroups)
+            {
+                var color = ToolPermissions.IsElevated(group) ? Color.Warning : Color.Default;
+                <MudChip T="string" Size="Size.Small" Color="color" Icon="@Icons.Material.Filled.Security">@group</MudChip>
+            }
+        </div>
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OnViewDetail.InvokeAsync(Skill.Id))">
+            View Details
+        </MudButton>
+        <MudSpacer />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            @Skill.DownloadCount downloads
+        </MudText>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Skill Skill { get; set; } = default!;
+    [Parameter] public bool IsInstalled { get; set; }
+    [Parameter] public bool ShowInstallButton { get; set; } = true;
+    [Parameter] public EventCallback<string> OnInstall { get; set; }
+    [Parameter] public EventCallback<string> OnUninstall { get; set; }
+    [Parameter] public EventCallback<string> OnViewDetail { get; set; }
+    [Parameter] public EventCallback<string> OnTagClick { get; set; }
+}

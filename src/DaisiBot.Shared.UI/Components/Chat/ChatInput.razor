@@ -1,0 +1,40 @@
+<div class="chat-input pa-3 d-flex align-center">
+    <MudTextField @bind-Value="_message" Label="Type your message..." Variant="Variant.Outlined"
+                  FullWidth="true" Immediate="true" OnKeyDown="OnKeyDown"
+                  Disabled="IsStreaming" Class="flex-grow-1 mr-2" />
+    @if (IsStreaming)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Stop" Color="Color.Error" OnClick="OnStopClick" />
+    }
+    else
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary" OnClick="OnSendClick" />
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnSend { get; set; }
+    [Parameter] public EventCallback OnStop { get; set; }
+    [Parameter] public bool IsStreaming { get; set; }
+
+    private string _message = string.Empty;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !IsStreaming)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task OnSendClick() => await SendAsync();
+    private async Task OnStopClick() => await OnStop.InvokeAsync();
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_message)) return;
+        var msg = _message;
+        _message = string.Empty;
+        await OnSend.InvokeAsync(msg);
+    }
+}

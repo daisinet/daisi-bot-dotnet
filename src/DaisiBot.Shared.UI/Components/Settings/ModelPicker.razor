@@ -1,0 +1,29 @@
+@inject IModelService ModelService
+@inject ISettingsService SettingsService
+
+<MudSelect T="string" @bind-Value="_selectedModel" Label="Default Model" Variant="Variant.Outlined" Class="mb-3">
+    @foreach (var model in _models)
+    {
+        <MudSelectItem Value="@model.Name">
+            @model.Name
+            @if (model.IsDefault) { <MudChip T="string" Size="Size.Small" Color="Color.Info">Default</MudChip> }
+            @if (model.HasReasoning) { <MudChip T="string" Size="Size.Small" Color="Color.Success">Reasoning</MudChip> }
+        </MudSelectItem>
+    }
+</MudSelect>
+
+@code {
+    private List<AvailableModel> _models = [];
+    private string _selectedModel = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _models = await ModelService.GetAvailableModelsAsync();
+            var settings = await SettingsService.GetSettingsAsync();
+            _selectedModel = settings.DefaultModelName;
+        }
+        catch { }
+    }
+}

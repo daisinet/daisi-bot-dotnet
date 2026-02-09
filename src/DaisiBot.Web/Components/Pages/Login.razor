@@ -1,0 +1,22 @@
+@page "/login"
+@inject IDialogService DialogService
+
+<div class="d-flex justify-content-center py-5">
+    <div class="glass-card" style="max-width: 450px; width: 100%;">
+        <h2 class="font-accent text-center mb-4" style="color: white;">Sign In</h2>
+        <p class="text-center text-muted mb-4">Sign in to install skills and manage your collection.</p>
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                   OnClick="ShowLoginDialog">
+            Sign In with DAISI
+        </MudButton>
+    </div>
+</div>
+
+@code {
+    private async Task ShowLoginDialog()
+    {
+        var dialog = await DialogService.ShowAsync<DaisiBot.Shared.UI.Components.Auth.LoginDialog>("Sign In");
+        await dialog.Result;
+    }
+}

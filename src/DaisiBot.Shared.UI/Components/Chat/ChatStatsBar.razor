@@ -1,0 +1,22 @@
+@if (Stats is not null && Stats.LastMessageTokenCount > 0)
+{
+    <div class="chat-stats-bar pa-2 d-flex gap-4">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            <MudIcon Icon="@Icons.Material.Filled.Token" Size="Size.Small" /> @Stats.LastMessageTokenCount tokens
+        </MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            <MudIcon Icon="@Icons.Material.Filled.Speed" Size="Size.Small" /> @Stats.TokensPerSecond.ToString("F1") t/s
+        </MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            <MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Small" /> @Stats.LastMessageComputeTimeMs.ToString("F0")ms
+        </MudText>
+        <MudSpacer />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Session: @Stats.SessionTokenCount tokens
+        </MudText>
+    </div>
+}
+
+@code {
+    [Parameter] public ChatStats? Stats { get; set; }
+}

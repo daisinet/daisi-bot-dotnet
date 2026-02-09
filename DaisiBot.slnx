@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DaisiBot.Core/DaisiBot.Core.csproj" />
+    <Project Path="src/DaisiBot.Data/DaisiBot.Data.csproj" />
+    <Project Path="src/DaisiBot.Agent/DaisiBot.Agent.csproj" />
+    <Project Path="src/DaisiBot.Shared.UI/DaisiBot.Shared.UI.csproj" />
+    <Project Path="src/DaisiBot.Tui/DaisiBot.Tui.csproj" />
+    <Project Path="src/DaisiBot.Maui/DaisiBot.Maui.csproj" />
+    <Project Path="src/DaisiBot.Web/DaisiBot.Web.csproj" />
+  </Folder>
+</Solution>

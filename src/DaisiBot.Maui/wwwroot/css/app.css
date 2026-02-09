@@ -1,0 +1,32 @@
+:root {
+    --primary-color: #FFFFFF;
+    --accent-color: #f78c1d;
+    --bg-main: #1B1B1B;
+    --text-color: #C2C2C2;
+    --font-main: "DM Sans", sans-serif;
+    --font-accent: "Anta", system-ui;
+}
+
+html, body {
+    font-family: var(--font-main);
+    background-color: var(--bg-main);
+    color: var(--text-color);
+    margin: 0;
+    padding: 0;
+}
+
+.markdown-content pre {
+    background-color: #2d2d2d;
+    border-radius: 8px;
+    padding: 12px;
+    overflow-x: auto;
+}
+
+.markdown-content code {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.9em;
+}
+
+.markdown-content p {
+    margin-bottom: 0.5rem;
+}
