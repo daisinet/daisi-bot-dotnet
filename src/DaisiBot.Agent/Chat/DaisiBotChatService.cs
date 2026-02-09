@@ -75,7 +75,6 @@ public class DaisiBotChatService : IChatService
             yield break;
         }
 
-        // Create inference client if needed
         if (_inferenceClient is null)
         {
             _inferenceClient = CreateInferenceClient();
@@ -99,12 +98,22 @@ public class DaisiBotChatService : IChatService
         string? createError = null;
         try
         {
-            var createResponse = await _inferenceClient.CreateAsync(createRequest);
+            await _inferenceClient.CreateAsync(createRequest);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (_inferenceClient is not null)
         {
-            _logger.LogError(ex, "Failed to create inference session");
-            createError = ex.Message;
+            _logger.LogWarning(ex, "Session may have expired, reconnecting");
+            _inferenceClient = CreateInferenceClient();
+            ConnectionStateChanged?.Invoke(this, true);
+            try
+            {
+                await _inferenceClient.CreateAsync(createRequest);
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError(retryEx, "Failed to create inference session after retry");
+                createError = retryEx.Message;
+            }
         }
 
         if (createError is not null)
@@ -153,7 +162,7 @@ public class DaisiBotChatService : IChatService
             SortOrder = conversation.Messages.Count + 1
         };
 
-        // Get stats
+        // Get stats then close inference (keep Orc session alive for reuse)
         try
         {
             var stats = _inferenceClient.Stats(new InferenceStatsRequest());
@@ -173,6 +182,9 @@ public class DaisiBotChatService : IChatService
         {
             _logger.LogWarning(ex, "Failed to get inference stats");
         }
+
+        await SafeCloseAsync(closeOrcSession: false);
+        _inferenceClient = null;
 
         await _conversationStore.AddMessageAsync(assistantMsg);
 
@@ -195,7 +207,6 @@ public class DaisiBotChatService : IChatService
         AgentConfig config,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // Ensure inference client
         if (_inferenceClient is null)
         {
             _inferenceClient = CreateInferenceClient();
@@ -289,9 +300,6 @@ public class DaisiBotChatService : IChatService
             yield return chunk;
         }
 
-        // Close synthesis session
-        await SafeCloseAsync(closeOrcSession: false);
-
         // Persist assistant message
         var cleanedContent = ContentCleaner.Clean(fullContent);
         var assistantMsg = new ChatMessage
@@ -303,7 +311,7 @@ public class DaisiBotChatService : IChatService
             SortOrder = conversation.Messages.Count + 1
         };
 
-        // Get stats from last session
+        // Get stats then close inference (keep Orc session alive for reuse)
         try
         {
             var stats = _inferenceClient.Stats(new InferenceStatsRequest());
@@ -323,6 +331,9 @@ public class DaisiBotChatService : IChatService
         {
             _logger.LogWarning(ex, "Failed to get inference stats");
         }
+
+        await SafeCloseAsync(closeOrcSession: false);
+        _inferenceClient = null;
 
         await _conversationStore.AddMessageAsync(assistantMsg);
 
@@ -350,7 +361,17 @@ public class DaisiBotChatService : IChatService
 
         try
         {
-            await _inferenceClient!.CreateAsync(planCreateRequest);
+            try
+            {
+                await _inferenceClient!.CreateAsync(planCreateRequest);
+            }
+            catch (Exception ex) when (_inferenceClient is not null)
+            {
+                _logger.LogWarning(ex, "Session may have expired during planning, reconnecting");
+                _inferenceClient = CreateInferenceClient();
+                ConnectionStateChanged?.Invoke(this, true);
+                await _inferenceClient.CreateAsync(planCreateRequest);
+            }
 
             var planSendRequest = SendInferenceRequest.CreateDefault();
             planSendRequest.Text = userMessage;
@@ -535,9 +556,19 @@ public class DaisiBotChatService : IChatService
         {
             await _inferenceClient!.CreateAsync(createRequest);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (_inferenceClient is not null)
         {
-            createError = ex.Message;
+            _logger.LogWarning(ex, "Session may have expired during fallback, reconnecting");
+            _inferenceClient = CreateInferenceClient();
+            ConnectionStateChanged?.Invoke(this, true);
+            try
+            {
+                await _inferenceClient.CreateAsync(createRequest);
+            }
+            catch (Exception retryEx)
+            {
+                createError = retryEx.Message;
+            }
         }
 
         if (createError is not null)
@@ -602,6 +633,9 @@ public class DaisiBotChatService : IChatService
         {
             _logger.LogWarning(ex, "Failed to get inference stats");
         }
+
+        await SafeCloseAsync(closeOrcSession: false);
+        _inferenceClient = null;
 
         await _conversationStore.AddMessageAsync(assistantMsg);
 

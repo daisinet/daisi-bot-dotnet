@@ -57,12 +57,17 @@ public static class MauiProgram
 
         var app = builder.Build();
 
-        // Ensure database created and initialize auth
+        // Ensure database created and schema up to date, then apply saved connection settings
         using (var scope = app.Services.CreateScope())
         {
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DaisiBotDbContext>>();
             using var db = factory.CreateDbContext();
             db.Database.EnsureCreated();
+            db.ApplyMigrationsAsync().GetAwaiter().GetResult();
+
+            var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            var settings = settingsService.GetSettingsAsync().GetAwaiter().GetResult();
+            DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
         }
 
         var authService = app.Services.GetRequiredService<DaisiBotAuthService>();

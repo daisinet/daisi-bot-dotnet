@@ -1,4 +1,5 @@
 using System.Text;
+using Daisi.SDK.Models;
 using DaisiBot.Core.Enums;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
@@ -15,9 +16,12 @@ public class SettingsFlow : IModal
 {
     private readonly App _app;
     private readonly ISettingsService _settingsService;
+    private readonly IAuthService _authService;
     private DialogRunner.BoxBounds? _box;
     private UserSettings _settings = new();
     private bool _loaded;
+    private string _originalOrcDomain = "";
+    private int _originalOrcPort;
 
     private enum Page { Inference, Connection, Prompt, Tools }
     private Page _currentPage = Page.Inference;
@@ -42,6 +46,9 @@ public class SettingsFlow : IModal
 
     private bool _editing;
     private int _editCursor;
+    private bool _saving;
+    private string _statusText = "";
+    private ConsoleColor _statusColor = ConsoleColor.Gray;
 
     private static readonly string[] PageNames = ["Inference", "Connection", "Prompt", "Tools"];
 
@@ -49,6 +56,7 @@ public class SettingsFlow : IModal
     {
         _app = app;
         _settingsService = services.GetRequiredService<ISettingsService>();
+        _authService = services.GetRequiredService<IAuthService>();
         _allGroups = Enum.GetValues<ToolGroupSelection>();
         _toolChecks = new bool[_allGroups.Length];
         LoadSettings();
@@ -58,26 +66,40 @@ public class SettingsFlow : IModal
     {
         Task.Run(async () =>
         {
-            var settings = await _settingsService.GetSettingsAsync();
-            _app.Post(() =>
+            try
             {
-                _settings = settings;
-                _tempField.Clear().Append(settings.Temperature.ToString("F1"));
-                _topPField.Clear().Append(settings.TopP.ToString("F1"));
-                _maxTokensField.Clear().Append(settings.MaxTokens.ToString());
-                _orcDomainField.Clear().Append(settings.OrcDomain);
-                _orcPortField.Clear().Append(settings.OrcPort.ToString());
-                _orcUseSsl = settings.OrcUseSsl;
-                _systemPromptField.Clear().Append(settings.SystemPrompt);
+                var settings = await _settingsService.GetSettingsAsync();
+                _app.Post(() =>
+                {
+                    _settings = settings;
+                    _tempField.Clear().Append(settings.Temperature.ToString("F1"));
+                    _topPField.Clear().Append(settings.TopP.ToString("F1"));
+                    _maxTokensField.Clear().Append(settings.MaxTokens.ToString());
+                    _orcDomainField.Clear().Append(settings.OrcDomain);
+                    _orcPortField.Clear().Append(settings.OrcPort.ToString());
+                    _orcUseSsl = settings.OrcUseSsl;
+                    _originalOrcDomain = settings.OrcDomain;
+                    _originalOrcPort = settings.OrcPort;
+                    _systemPromptField.Clear().Append(settings.SystemPrompt);
 
-                var enabled = settings.GetEnabledToolGroups();
-                for (var i = 0; i < _allGroups.Length; i++)
-                    _toolChecks[i] = enabled.Contains(_allGroups[i]);
+                    var enabled = settings.GetEnabledToolGroups();
+                    for (var i = 0; i < _allGroups.Length; i++)
+                        _toolChecks[i] = enabled.Contains(_allGroups[i]);
 
-                _loaded = true;
-                Draw();
-                AnsiConsole.Flush();
-            });
+                    _loaded = true;
+                    Draw();
+                    AnsiConsole.Flush();
+                });
+            }
+            catch
+            {
+                _app.Post(() =>
+                {
+                    _loaded = true;
+                    Draw();
+                    AnsiConsole.Flush();
+                });
+            }
         });
     }
 
@@ -127,6 +149,9 @@ public class SettingsFlow : IModal
                 DrawToolsPage(contentTop);
                 break;
         }
+
+        if (_statusText.Length > 0)
+            DialogRunner.DrawStatus(_box, _statusText, _statusColor);
 
         DialogRunner.DrawButtonHints(_box, " \u2190\u2192:Page  \u2191\u2193:Field  Enter:Edit  S:Save  Esc:Cancel ");
     }
@@ -238,7 +263,14 @@ public class SettingsFlow : IModal
 
     public void HandleKey(ConsoleKeyInfo key)
     {
-        if (!_loaded) return;
+        // Always allow Escape, even while loading
+        if (key.Key == ConsoleKey.Escape && !_editing)
+        {
+            _app.CloseModal();
+            return;
+        }
+
+        if (!_loaded || _saving) return;
 
         if (_editing)
         {
@@ -460,10 +492,39 @@ public class SettingsFlow : IModal
         }
         _settings.SetEnabledToolGroups(enabledGroups);
 
+        _saving = true;
+        _statusText = "Saving...";
+        _statusColor = ConsoleColor.Yellow;
+        Draw();
+        AnsiConsole.Flush();
+
         Task.Run(async () =>
         {
-            await _settingsService.SaveSettingsAsync(_settings);
-            _app.Post(() => _app.CloseModal());
+            try
+            {
+                await _settingsService.SaveSettingsAsync(_settings);
+                DaisiStaticSettings.ApplyUserSettings(
+                    _settings.OrcDomain, _settings.OrcPort, _settings.OrcUseSsl);
+
+                // If the Orc changed, the old client key is invalid for the new Orc
+                var orcChanged = _settings.OrcDomain != _originalOrcDomain
+                              || _settings.OrcPort != _originalOrcPort;
+                if (orcChanged)
+                    await _authService.LogoutAsync();
+
+                _app.Post(() => _app.CloseModal());
+            }
+            catch (Exception ex)
+            {
+                _app.Post(() =>
+                {
+                    _saving = false;
+                    _statusText = $"Save failed: {ex.Message}";
+                    _statusColor = ConsoleColor.Red;
+                    Draw();
+                    AnsiConsole.Flush();
+                });
+            }
         });
     }
 

@@ -40,12 +40,17 @@ builder.Services.AddSingleton<ILocalInferenceService, LocalInferenceService>();
 
 var host = builder.Build();
 
-// Ensure database created
+// Ensure database created and schema up to date, then apply saved connection settings
 using (var scope = host.Services.CreateScope())
 {
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DaisiBotDbContext>>();
     await using var db = await factory.CreateDbContextAsync();
     await db.Database.EnsureCreatedAsync();
+    await db.ApplyMigrationsAsync();
+
+    var settingsService = scope.ServiceProvider.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
+    var settings = await settingsService.GetSettingsAsync();
+    DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
 }
 
 // Initialize auth

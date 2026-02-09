@@ -54,4 +54,45 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         Directory.CreateDirectory(folder);
         return Path.Combine(folder, "daisibot.db");
     }
+
+    /// <summary>
+    /// Adds any columns missing from an existing database.
+    /// EnsureCreated only works on a fresh DB; this handles schema drift.
+    /// </summary>
+    public async Task ApplyMigrationsAsync()
+    {
+        var conn = Database.GetDbConnection();
+        await conn.OpenAsync();
+
+        // Get existing columns in the Settings table
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(Settings)";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                existingColumns.Add(reader.GetString(1));
+        }
+
+        // Columns that may be missing from older databases
+        (string Name, string Sql)[] migrations =
+        [
+            ("EnabledSkillIdsCsv", "ALTER TABLE Settings ADD COLUMN EnabledSkillIdsCsv TEXT NOT NULL DEFAULT ''"),
+            ("HostModeEnabled", "ALTER TABLE Settings ADD COLUMN HostModeEnabled INTEGER NOT NULL DEFAULT 0"),
+            ("ModelFolderPath", "ALTER TABLE Settings ADD COLUMN ModelFolderPath TEXT NOT NULL DEFAULT ''"),
+            ("LlamaRuntime", "ALTER TABLE Settings ADD COLUMN LlamaRuntime INTEGER NOT NULL DEFAULT 0"),
+            ("ContextSize", "ALTER TABLE Settings ADD COLUMN ContextSize INTEGER NOT NULL DEFAULT 2048"),
+            ("GpuLayerCount", "ALTER TABLE Settings ADD COLUMN GpuLayerCount INTEGER NOT NULL DEFAULT -1"),
+            ("BatchSize", "ALTER TABLE Settings ADD COLUMN BatchSize INTEGER NOT NULL DEFAULT 512"),
+            ("NetworkHostEnabled", "ALTER TABLE Settings ADD COLUMN NetworkHostEnabled INTEGER NOT NULL DEFAULT 0"),
+        ];
+
+        foreach (var (name, sql) in migrations)
+        {
+            if (existingColumns.Contains(name)) continue;
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
 }

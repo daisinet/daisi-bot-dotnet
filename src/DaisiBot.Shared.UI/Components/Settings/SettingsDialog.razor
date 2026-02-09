@@ -1,4 +1,6 @@
+@using Daisi.SDK.Models
 @inject ISettingsService SettingsService
+@inject IAuthService AuthService
 
 <MudDialog Style="max-width: 600px;">
     <TitleContent>
@@ -42,17 +44,27 @@
 
     private UserSettings _settings = new();
     private List<ToolGroupSelection> _enabledGroups = [];
+    private string _originalOrcDomain = "";
+    private int _originalOrcPort;
 
     protected override async Task OnInitializedAsync()
     {
         _settings = await SettingsService.GetSettingsAsync();
         _enabledGroups = _settings.GetEnabledToolGroups();
+        _originalOrcDomain = _settings.OrcDomain;
+        _originalOrcPort = _settings.OrcPort;
     }
 
     private async Task Save()
     {
         _settings.SetEnabledToolGroups(_enabledGroups);
         await SettingsService.SaveSettingsAsync(_settings);
+        DaisiStaticSettings.ApplyUserSettings(
+            _settings.OrcDomain, _settings.OrcPort, _settings.OrcUseSsl);
+
+        if (_settings.OrcDomain != _originalOrcDomain || _settings.OrcPort != _originalOrcPort)
+            await AuthService.LogoutAsync();
+
         MudDialog.Close(DialogResult.Ok(true));
     }
 

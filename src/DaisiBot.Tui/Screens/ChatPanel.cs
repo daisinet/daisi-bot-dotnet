@@ -14,6 +14,7 @@ public class ChatPanel
 {
     private readonly App _app;
     private readonly IServiceProvider _services;
+    private readonly IChatService _chatService;
     private Conversation? _conversation;
     private bool _isStreaming;
 
@@ -44,6 +45,7 @@ public class ChatPanel
     {
         _app = app;
         _services = services;
+        _chatService = services.GetRequiredService<IChatService>();
     }
 
     public void SetConversation(Conversation conversation)
@@ -342,10 +344,9 @@ public class ChatPanel
                     EnabledToolGroups = settings.GetEnabledToolGroups()
                 };
 
-                var chatService = _services.GetRequiredService<IChatService>();
                 var streamBuf = new StringBuilder();
 
-                await foreach (var chunk in chatService.SendMessageAsync(
+                await foreach (var chunk in _chatService.SendMessageAsync(
                     _conversation.Id, input, config))
                 {
                     if (chunk.IsComplete) break;
@@ -368,7 +369,7 @@ public class ChatPanel
                 }
 
                 // Get stats
-                var stats = await chatService.GetCurrentStatsAsync();
+                var stats = await _chatService.GetCurrentStatsAsync();
 
                 _app.Post(() =>
                 {
@@ -420,8 +421,7 @@ public class ChatPanel
     {
         Task.Run(async () =>
         {
-            var chatService = _services.GetRequiredService<IChatService>();
-            await chatService.StopGenerationAsync();
+            await _chatService.StopGenerationAsync();
         });
     }
 

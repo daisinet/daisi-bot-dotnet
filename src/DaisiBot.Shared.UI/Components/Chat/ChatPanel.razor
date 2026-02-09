@@ -45,10 +45,16 @@
     private string? _currentPlanGoal;
     private List<ActionPlanDisplay.ActionPlanStep> _currentPlanSteps = [];
 
+    private Guid? _previousConversationId;
+
     protected override async Task OnParametersSetAsync()
     {
-        if (ConversationId.HasValue)
+        if (ConversationId.HasValue && ConversationId != _previousConversationId)
         {
+            if (_previousConversationId.HasValue)
+                await ChatService.CloseSessionAsync();
+
+            _previousConversationId = ConversationId;
             _conversation = await ConversationStore.GetAsync(ConversationId.Value);
             StateHasChanged();
         }

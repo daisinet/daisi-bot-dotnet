@@ -187,6 +187,9 @@ public class MainScreen : IScreen
         _currentConversation = conversation;
         Task.Run(async () =>
         {
+            var chatService = _services.GetRequiredService<IChatService>();
+            await chatService.CloseSessionAsync();
+
             var full = await _conversationStore.GetAsync(conversation.Id);
             if (full is not null)
             {
@@ -203,6 +206,9 @@ public class MainScreen : IScreen
     {
         Task.Run(async () =>
         {
+            var chatService = _services.GetRequiredService<IChatService>();
+            await chatService.CloseSessionAsync();
+
             var settings = await _settingsService.GetSettingsAsync();
             var conversation = new Conversation
             {

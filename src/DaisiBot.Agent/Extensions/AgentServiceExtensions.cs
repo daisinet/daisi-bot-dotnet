@@ -26,7 +26,7 @@ public static class AgentServiceExtensions
         services.AddSingleton<IAuthService>(sp => sp.GetRequiredService<DaisiBotAuthService>());
 
         // Chat
-        services.AddTransient<IChatService, DaisiBotChatService>();
+        services.AddSingleton<IChatService, DaisiBotChatService>();
 
         // Models
         services.AddTransient<IModelService, DaisiBotModelService>();
