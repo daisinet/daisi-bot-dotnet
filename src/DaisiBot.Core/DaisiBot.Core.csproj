@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.SDK\Daisi.SDK.csproj" />
+  </ItemGroup>
+
 </Project>

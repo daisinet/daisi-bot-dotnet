@@ -11,6 +11,7 @@ public static class EnumMapper
         ConversationThinkLevel.BasicWithTools => ThinkLevels.BasicWithTools,
         ConversationThinkLevel.ChainOfThought => ThinkLevels.ChainOfThought,
         ConversationThinkLevel.TreeOfThought => ThinkLevels.TreeOfThought,
+        ConversationThinkLevel.Agent => ThinkLevels.BasicWithTools,
         _ => ThinkLevels.Basic
     };
 

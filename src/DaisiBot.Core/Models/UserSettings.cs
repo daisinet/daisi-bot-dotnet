@@ -18,6 +18,15 @@ public class UserSettings
     public string EnabledToolGroupsCsv { get; set; } = string.Empty;
     public string EnabledSkillIdsCsv { get; set; } = string.Empty;
 
+    // Host mode settings
+    public bool HostModeEnabled { get; set; }
+    public string ModelFolderPath { get; set; } = string.Empty;
+    public int LlamaRuntime { get; set; }
+    public uint ContextSize { get; set; } = 2048;
+    public int GpuLayerCount { get; set; } = -1;
+    public uint BatchSize { get; set; } = 512;
+    public bool NetworkHostEnabled { get; set; }
+
     public List<ToolGroupSelection> GetEnabledToolGroups()
     {
         if (string.IsNullOrWhiteSpace(EnabledToolGroupsCsv))

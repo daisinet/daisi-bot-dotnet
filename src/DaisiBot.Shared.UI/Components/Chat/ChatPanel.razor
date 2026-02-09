@@ -1,3 +1,4 @@
+@using System.Text.Json
 @inject IChatService ChatService
 @inject IConversationStore ConversationStore
 @inject ISettingsService SettingsService
@@ -15,6 +16,11 @@
 
         @if (_isStreaming)
         {
+            @if (_currentPlanGoal is not null)
+            {
+                <ActionPlanDisplay Goal="@_currentPlanGoal" Steps="_currentPlanSteps" />
+            }
+
             <StreamingMessage Content="@_streamContent" Type="@_streamType" />
         }
     </div>
@@ -34,6 +40,10 @@
     private ChatStats _stats = new();
     private ElementReference _messageContainer;
     private CancellationTokenSource? _cts;
+
+    // Agent plan state
+    private string? _currentPlanGoal;
+    private List<ActionPlanDisplay.ActionPlanStep> _currentPlanSteps = [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -59,6 +69,8 @@
 
         _isStreaming = true;
         _streamContent = string.Empty;
+        _currentPlanGoal = null;
+        _currentPlanSteps = [];
         _cts = new CancellationTokenSource();
 
         var settings = await SettingsService.GetSettingsAsync();
@@ -78,8 +90,27 @@
             await foreach (var chunk in ChatService.SendMessageAsync(_conversation.Id, message, config, _cts.Token))
             {
                 if (chunk.IsComplete) break;
-                _streamContent += chunk.Content;
-                _streamType = chunk.Type;
+
+                switch (chunk.Type)
+                {
+                    case "ActionPlan":
+                        HandleActionPlan(chunk.Content);
+                        break;
+
+                    case "ActionStepStart":
+                        HandleStepStart(chunk.Content);
+                        break;
+
+                    case "ActionStepResult":
+                        HandleStepResult(chunk.Content);
+                        break;
+
+                    default:
+                        _streamContent += chunk.Content;
+                        _streamType = chunk.Type;
+                        break;
+                }
+
                 await InvokeAsync(StateHasChanged);
             }
 
@@ -92,8 +123,66 @@
         }
 
         _isStreaming = false;
+        _currentPlanGoal = null;
+        _currentPlanSteps = [];
         _conversation = await ConversationStore.GetAsync(_conversation.Id);
         await InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleActionPlan(string json)
+    {
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ActionPlanPayload>(json);
+            if (payload is null) return;
+
+            _currentPlanGoal = payload.Goal;
+            _currentPlanSteps = payload.Steps.Select(s => new ActionPlanDisplay.ActionPlanStep
+            {
+                StepNumber = s.StepNumber,
+                Description = s.Description,
+                Status = ActionItemStatus.Pending
+            }).ToList();
+        }
+        catch { /* ignore malformed plan JSON */ }
+    }
+
+    private void HandleStepStart(string json)
+    {
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ActionStepStartPayload>(json);
+            if (payload is null) return;
+
+            var step = _currentPlanSteps.FirstOrDefault(s => s.StepNumber == payload.StepNumber);
+            if (step is not null)
+            {
+                step.Status = ActionItemStatus.Running;
+            }
+
+            // Clear streaming content for the new step
+            _streamContent = string.Empty;
+        }
+        catch { /* ignore */ }
+    }
+
+    private void HandleStepResult(string json)
+    {
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ActionStepResultPayload>(json);
+            if (payload is null) return;
+
+            var step = _currentPlanSteps.FirstOrDefault(s => s.StepNumber == payload.StepNumber);
+            if (step is not null)
+            {
+                step.Status = payload.Status;
+            }
+
+            // Clear streaming content after step completes
+            _streamContent = string.Empty;
+        }
+        catch { /* ignore */ }
     }
 
     private async Task OnStopGeneration()

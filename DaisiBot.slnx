@@ -8,4 +8,7 @@
     <Project Path="src/DaisiBot.Maui/DaisiBot.Maui.csproj" />
     <Project Path="src/DaisiBot.Web/DaisiBot.Web.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DaisiBot.Agent.Tests/DaisiBot.Agent.Tests.csproj" />
+  </Folder>
 </Solution>

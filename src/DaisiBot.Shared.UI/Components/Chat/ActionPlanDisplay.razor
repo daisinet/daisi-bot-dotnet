@@ -1,0 +1,54 @@
+@if (!string.IsNullOrEmpty(Goal))
+{
+    <MudPaper Class="pa-3 mb-3" Elevation="1">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.ListAlt" Size="Size.Small" Class="mr-1" />
+            @Goal
+        </MudText>
+
+        <MudList T="string" Dense="true">
+            @foreach (var step in Steps)
+            {
+                <MudListItem>
+                    <div class="d-flex align-center">
+                        @switch (step.Status)
+                        {
+                            case ActionItemStatus.Running:
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width:20px;height:20px;" />
+                                break;
+                            case ActionItemStatus.Complete:
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" Class="mr-2" />
+                                break;
+                            case ActionItemStatus.Failed:
+                                <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" Class="mr-2" />
+                                break;
+                            case ActionItemStatus.Skipped:
+                                <MudIcon Icon="@Icons.Material.Filled.SkipNext" Color="Color.Default" Size="Size.Small" Class="mr-2" />
+                                break;
+                            default:
+                                <MudIcon Icon="@Icons.Material.Filled.RadioButtonUnchecked" Color="Color.Default" Size="Size.Small" Class="mr-2" />
+                                break;
+                        }
+
+                        <MudText Typo="Typo.body2"
+                                 Style="@(step.Status == ActionItemStatus.Complete ? "text-decoration: line-through; opacity: 0.7;" : "")">
+                            @step.StepNumber. @step.Description
+                        </MudText>
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public string Goal { get; set; } = string.Empty;
+    [Parameter] public List<ActionPlanStep> Steps { get; set; } = [];
+
+    public class ActionPlanStep
+    {
+        public int StepNumber { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public ActionItemStatus Status { get; set; } = ActionItemStatus.Pending;
+    }
+}

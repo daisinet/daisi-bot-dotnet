@@ -10,6 +10,13 @@
     <ProjectReference Include="..\DaisiBot.Core\DaisiBot.Core.csproj" />
     <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
     <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.SDK\Daisi.SDK.csproj" />
+    <ProjectReference Include="..\..\..\daisi-hosts-dotnet\Daisi.Host.Core\Daisi.Host.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.25.0" />
   </ItemGroup>
 
 </Project>
