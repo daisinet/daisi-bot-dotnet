@@ -1,0 +1,80 @@
+@inject IBotStore BotStore
+@inject IBotEngine BotEngine
+@implements IDisposable
+
+<div class="px-3 d-flex justify-space-between align-center mb-2">
+    <MudText Typo="Typo.subtitle2">Bots</MudText>
+    <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="OnNewBot" />
+</div>
+
+<MudNavMenu Dense="true" Class="bot-list">
+    @foreach (var bot in _bots)
+    {
+        <MudNavLink OnClick="@(() => OnBotClick(bot.Id))">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@GetStatusIcon(bot.Status)" Color="@GetStatusColor(bot.Status)" Size="Size.Small" />
+                <div>
+                    <MudText Typo="Typo.body2" Class="text-truncate">@bot.Label</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@bot.ScheduleType — @bot.Status</MudText>
+                </div>
+            </div>
+        </MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    [Parameter] public EventCallback<Guid> OnBotSelected { get; set; }
+    [Parameter] public EventCallback OnNewBotRequested { get; set; }
+
+    private List<BotInstance> _bots = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        BotEngine.BotStatusChanged += OnBotStatusChanged;
+        await RefreshAsync();
+    }
+
+    public async Task RefreshAsync()
+    {
+        _bots = await BotStore.GetAllAsync();
+        StateHasChanged();
+    }
+
+    private void OnBotStatusChanged(object? sender, BotInstance bot)
+    {
+        InvokeAsync(async () =>
+        {
+            await RefreshAsync();
+        });
+    }
+
+    private async Task OnBotClick(Guid id) => await OnBotSelected.InvokeAsync(id);
+    private async Task OnNewBot() => await OnNewBotRequested.InvokeAsync();
+
+    private static string GetStatusIcon(BotStatus status) => status switch
+    {
+        BotStatus.Running => Icons.Material.Filled.PlayArrow,
+        BotStatus.Idle => Icons.Material.Filled.RadioButtonUnchecked,
+        BotStatus.WaitingForInput => Icons.Material.Filled.Warning,
+        BotStatus.Completed => Icons.Material.Filled.CheckCircle,
+        BotStatus.Failed => Icons.Material.Filled.Error,
+        BotStatus.Stopped => Icons.Material.Filled.Stop,
+        _ => Icons.Material.Filled.RadioButtonUnchecked
+    };
+
+    private static Color GetStatusColor(BotStatus status) => status switch
+    {
+        BotStatus.Running => Color.Success,
+        BotStatus.Idle => Color.Default,
+        BotStatus.WaitingForInput => Color.Warning,
+        BotStatus.Completed => Color.Info,
+        BotStatus.Failed => Color.Error,
+        BotStatus.Stopped => Color.Default,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        BotEngine.BotStatusChanged -= OnBotStatusChanged;
+    }
+}

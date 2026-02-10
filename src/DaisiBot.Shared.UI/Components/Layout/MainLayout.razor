@@ -2,7 +2,9 @@
 @inject IAuthService AuthService
 @inject IConversationStore ConversationStore
 @inject ChatNavigationState ChatNav
+@inject BotNavigationState BotNav
 @inject NavigationManager Navigation
+@inject IDialogService DialogService
 @implements IDisposable
 
 <MudThemeProvider IsDarkMode="true" />
@@ -23,6 +25,11 @@
         <NavSidebar @ref="_sidebar"
                     OnConversationSelected="OnConversationSelected"
                     OnNewConversationRequested="OnNewConversation" />
+
+        <MudDivider Class="my-2" />
+        <BotListPanel @ref="_botListPanel"
+                      OnBotSelected="OnBotSelected"
+                      OnNewBotRequested="OnNewBotRequested" />
     </MudDrawer>
 
     <MudMainContent Class="pa-4">
@@ -33,6 +40,7 @@
 @code {
     private bool _drawerOpen = true;
     private NavSidebar? _sidebar;
+    private BotListPanel? _botListPanel;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -63,6 +71,25 @@
         ChatNav.SelectConversation(conversation.Id);
         if (_sidebar is not null)
             await _sidebar.RefreshAsync();
+    }
+
+    private void OnBotSelected(Guid id)
+    {
+        BotNav.SelectBot(id);
+        Navigation.NavigateTo("/bots");
+    }
+
+    private async Task OnNewBotRequested()
+    {
+        var dialog = await DialogService.ShowAsync<BotCreateDialog>("Create Bot");
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: BotInstance bot })
+        {
+            BotNav.SelectBot(bot.Id);
+            Navigation.NavigateTo("/bots");
+            if (_botListPanel is not null)
+                await _botListPanel.RefreshAsync();
+        }
     }
 
     public void Dispose() { }

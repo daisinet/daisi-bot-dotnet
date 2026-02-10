@@ -1,0 +1,28 @@
+@page "/bots"
+@inject BotNavigationState BotNav
+@implements IDisposable
+
+<BotDetailPanel BotId="BotNav.CurrentBotId"
+                OnBotDeleted="OnBotDeleted" />
+
+@code {
+    protected override void OnInitialized()
+    {
+        BotNav.Changed += OnNavChanged;
+    }
+
+    private void OnBotDeleted()
+    {
+        BotNav.Clear();
+    }
+
+    private void OnNavChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        BotNav.Changed -= OnNavChanged;
+    }
+}

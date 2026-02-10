@@ -1,0 +1,82 @@
+@inject IBotStore BotStore
+@inject IBotEngine BotEngine
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Create New Bot</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_goal" Label="Goal" Required="true" RequiredError="Goal is required"
+                      Placeholder="What should this bot do?" Class="mb-3"
+                      Lines="3" Variant="Variant.Outlined" />
+
+        <MudTextField @bind-Value="_label" Label="Label" Placeholder="Short name for this bot"
+                      Class="mb-3" Variant="Variant.Outlined" />
+
+        <MudTextField @bind-Value="_persona" Label="Persona (optional)"
+                      Placeholder="e.g. You are a helpful assistant that..."
+                      Class="mb-3" Variant="Variant.Outlined" />
+
+        <MudSelect @bind-Value="_scheduleType" Label="Schedule" Class="mb-3" Variant="Variant.Outlined">
+            @foreach (BotScheduleType st in Enum.GetValues<BotScheduleType>())
+            {
+                <MudSelectItem Value="st">@st</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_scheduleType == BotScheduleType.Interval)
+        {
+            <MudNumericField @bind-Value="_intervalMinutes" Label="Interval (minutes)"
+                             Min="1" Class="mb-3" Variant="Variant.Outlined" />
+        }
+
+        <MudRadioGroup @bind-Value="_startImmediately">
+            <MudRadio Value="true" Color="Color.Primary">Run immediately</MudRadio>
+            <MudRadio Value="false" Color="Color.Default">Create only (start later)</MudRadio>
+        </MudRadioGroup>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@string.IsNullOrWhiteSpace(_goal)">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _goal = string.Empty;
+    private string _label = string.Empty;
+    private string? _persona;
+    private BotScheduleType _scheduleType = BotScheduleType.Once;
+    private int _intervalMinutes = 60;
+    private bool _startImmediately = true;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_goal)) return;
+
+        var label = string.IsNullOrWhiteSpace(_label) ? _goal.Length > 40 ? _goal[..40] + "..." : _goal : _label;
+
+        var bot = new BotInstance
+        {
+            Label = label,
+            Goal = _goal,
+            Persona = string.IsNullOrWhiteSpace(_persona) ? null : _persona,
+            ScheduleType = _scheduleType,
+            ScheduleIntervalMinutes = _scheduleType == BotScheduleType.Interval ? _intervalMinutes : 0,
+            Status = BotStatus.Idle
+        };
+
+        bot = await BotStore.CreateAsync(bot);
+
+        if (_startImmediately)
+        {
+            await BotEngine.StartBotAsync(bot.Id);
+        }
+
+        MudDialog.Close(DialogResult.Ok(bot));
+    }
+}

@@ -54,6 +54,7 @@ public static class MauiProgram
 
         // UI state
         builder.Services.AddSingleton<ChatNavigationState>();
+        builder.Services.AddSingleton<BotNavigationState>();
 
         var app = builder.Build();
 
@@ -65,7 +66,7 @@ public static class MauiProgram
             db.Database.EnsureCreated();
             db.ApplyMigrationsAsync().GetAwaiter().GetResult();
 
-            var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            var settingsService = scope.ServiceProvider.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
             var settings = settingsService.GetSettingsAsync().GetAwaiter().GetResult();
             DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
         }

@@ -1,0 +1,232 @@
+@inject IBotStore BotStore
+@inject IBotEngine BotEngine
+@inject IDialogService DialogService
+@implements IDisposable
+
+@if (_bot is null)
+{
+    <MudText Typo="Typo.h6" Class="mud-text-secondary pa-4">Select a bot or create a new one.</MudText>
+}
+else
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <div class="d-flex align-center gap-3 mb-2">
+            <MudText Typo="Typo.h5">@_bot.Label</MudText>
+            <MudChip T="string" Color="@GetStatusColor(_bot.Status)" Size="Size.Small">@_bot.Status</MudChip>
+        </div>
+        <MudText Typo="Typo.body1" Class="mb-1">@_bot.Goal</MudText>
+        @if (!string.IsNullOrEmpty(_bot.Persona))
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-1">Persona: @_bot.Persona</MudText>
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Schedule: @_bot.ScheduleType
+            @if (_bot.ScheduleType == BotScheduleType.Interval)
+            {
+                <text> (every @_bot.ScheduleIntervalMinutes min)</text>
+            }
+            — Runs: @_bot.ExecutionCount
+        </MudText>
+
+        <MudToolBar Dense="true" Class="mt-2 pa-0">
+            @if (_bot.Status is BotStatus.Idle or BotStatus.Stopped or BotStatus.Failed)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartBot">Start</MudButton>
+            }
+            @if (_bot.Status is BotStatus.Running or BotStatus.WaitingForInput)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Stop" OnClick="StopBot">Stop</MudButton>
+            }
+            @if (_bot.Status is BotStatus.Completed)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartBot">Run Again</MudButton>
+            }
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteBot">Delete</MudButton>
+        </MudToolBar>
+    </MudPaper>
+
+    @if (!string.IsNullOrEmpty(_bot.LastError))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">@_bot.LastError</MudAlert>
+    }
+
+    @if (_bot.Status == BotStatus.WaitingForInput && !string.IsNullOrEmpty(_bot.PendingQuestion))
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">@_bot.PendingQuestion</MudAlert>
+    }
+
+    <MudPaper Class="pa-4 mb-4" Elevation="1" Style="max-height: 500px; overflow-y: auto;">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Log</MudText>
+        @if (_logEntries.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">No log entries yet.</MudText>
+        }
+        else
+        {
+            @foreach (var entry in _logEntries)
+            {
+                <div class="d-flex align-start gap-2 mb-1">
+                    <MudIcon Icon="@GetLogIcon(entry.Level)" Color="@GetLogColor(entry.Level)" Size="Size.Small" />
+                    <div>
+                        <MudText Typo="Typo.body2">@entry.Message</MudText>
+                        @if (!string.IsNullOrEmpty(entry.Detail))
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Detail</MudText>
+                        }
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudText>
+                    </div>
+                </div>
+            }
+        }
+    </MudPaper>
+
+    <div class="d-flex gap-2">
+        <MudTextField @bind-Value="_inputText" Label="Send input to bot" Variant="Variant.Outlined"
+                      Disabled="@(_bot.Status != BotStatus.WaitingForInput)"
+                      OnKeyDown="OnInputKeyDown" Immediate="true" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(_bot.Status != BotStatus.WaitingForInput || string.IsNullOrWhiteSpace(_inputText))"
+                   OnClick="SendInput">Send</MudButton>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid? BotId { get; set; }
+    [Parameter] public EventCallback OnBotDeleted { get; set; }
+
+    private BotInstance? _bot;
+    private List<BotLogEntry> _logEntries = [];
+    private string _inputText = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        BotEngine.BotStatusChanged += OnBotStatusChanged;
+        await LoadBotAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadBotAsync();
+    }
+
+    private async Task LoadBotAsync()
+    {
+        if (BotId is null)
+        {
+            _bot = null;
+            _logEntries = [];
+            return;
+        }
+
+        _bot = await BotStore.GetAsync(BotId.Value);
+        if (_bot is not null)
+        {
+            _logEntries = await BotStore.GetLogEntriesAsync(BotId.Value);
+        }
+        else
+        {
+            _logEntries = [];
+        }
+    }
+
+    private void OnBotStatusChanged(object? sender, BotInstance bot)
+    {
+        if (bot.Id == BotId)
+        {
+            InvokeAsync(async () =>
+            {
+                await LoadBotAsync();
+                StateHasChanged();
+            });
+        }
+    }
+
+    private async Task StartBot()
+    {
+        if (_bot is null) return;
+        await BotEngine.StartBotAsync(_bot.Id);
+    }
+
+    private async Task StopBot()
+    {
+        if (_bot is null) return;
+        await BotEngine.StopBotAsync(_bot.Id);
+    }
+
+    private async Task DeleteBot()
+    {
+        if (_bot is null) return;
+        var result = await DialogService.ShowMessageBox(
+            "Delete Bot",
+            $"Are you sure you want to delete '{_bot.Label}'?",
+            yesText: "Delete", cancelText: "Cancel");
+        if (result == true)
+        {
+            if (BotEngine.IsRunning(_bot.Id))
+                await BotEngine.StopBotAsync(_bot.Id);
+            await BotStore.DeleteAsync(_bot.Id);
+            await OnBotDeleted.InvokeAsync();
+        }
+    }
+
+    private async Task SendInput()
+    {
+        if (_bot is null || string.IsNullOrWhiteSpace(_inputText)) return;
+        await BotEngine.SendInputAsync(_bot.Id, _inputText);
+        _inputText = string.Empty;
+    }
+
+    private async Task OnInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_inputText) && _bot?.Status == BotStatus.WaitingForInput)
+        {
+            await SendInput();
+        }
+    }
+
+    private static string GetLogIcon(BotLogLevel level) => level switch
+    {
+        BotLogLevel.StepStart => Icons.Material.Filled.PlayArrow,
+        BotLogLevel.StepComplete => Icons.Material.Filled.CheckCircle,
+        BotLogLevel.Error => Icons.Material.Filled.Error,
+        BotLogLevel.Warning => Icons.Material.Filled.Warning,
+        BotLogLevel.UserPrompt => Icons.Material.Filled.QuestionMark,
+        BotLogLevel.UserResponse => Icons.Material.Filled.Person,
+        BotLogLevel.SkillAction => Icons.Material.Filled.Bolt,
+        BotLogLevel.Info => Icons.Material.Filled.Info,
+        _ => Icons.Material.Filled.Info
+    };
+
+    private static Color GetLogColor(BotLogLevel level) => level switch
+    {
+        BotLogLevel.StepStart => Color.Primary,
+        BotLogLevel.StepComplete => Color.Success,
+        BotLogLevel.Error => Color.Error,
+        BotLogLevel.Warning => Color.Warning,
+        BotLogLevel.UserPrompt => Color.Warning,
+        BotLogLevel.UserResponse => Color.Info,
+        BotLogLevel.SkillAction => Color.Secondary,
+        BotLogLevel.Info => Color.Default,
+        _ => Color.Default
+    };
+
+    private static Color GetStatusColor(BotStatus status) => status switch
+    {
+        BotStatus.Running => Color.Success,
+        BotStatus.Idle => Color.Default,
+        BotStatus.WaitingForInput => Color.Warning,
+        BotStatus.Completed => Color.Info,
+        BotStatus.Failed => Color.Error,
+        BotStatus.Stopped => Color.Default,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        BotEngine.BotStatusChanged -= OnBotStatusChanged;
+    }
+}
