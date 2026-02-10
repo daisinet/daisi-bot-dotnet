@@ -714,26 +714,30 @@ public class DaisiBotChatService : IChatService
         var fullContent = new StringBuilder();
         var lastType = ChatMessageType.Text;
         string? streamError = null;
+        int lastMessageTokenCount = 0;
+        int lastSessionTokenCount = 0;
+        int lastComputeTimeMs = 0;
 
         await foreach (var chunk in StreamLocalChunksAsync(sendRequest, ct))
         {
-            if (chunk.Type == "Error")
+            if (chunk.Type == InferenceResponseTypes.Error)
             {
                 streamError = chunk.Content;
                 break;
             }
 
-            if (Enum.TryParse<InferenceResponseTypes>(chunk.Type, out var responseType))
-            {
-                lastType = EnumMapper.FromResponseType(responseType);
-            }
+            lastType = EnumMapper.FromResponseType(chunk.Type);
 
-            if (chunk.Type is "Text" or "ToolContent")
+            if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
             {
                 fullContent.Append(chunk.Content);
             }
 
-            yield return chunk;
+            if (chunk.MessageTokenCount > 0) lastMessageTokenCount = chunk.MessageTokenCount;
+            if (chunk.SessionTokenCount > 0) lastSessionTokenCount = chunk.SessionTokenCount;
+            if (chunk.ComputeTimeMs > 0) lastComputeTimeMs = chunk.ComputeTimeMs;
+
+            yield return new StreamChunk(chunk.Content, chunk.Type.ToString(), false);
         }
 
         // Close session (best effort)
@@ -749,6 +753,11 @@ public class DaisiBotChatService : IChatService
             yield break;
         }
 
+        // Compute tokens per second
+        var tokensPerSecond = lastComputeTimeMs > 0
+            ? lastMessageTokenCount / (lastComputeTimeMs / 1000.0)
+            : 0;
+
         // Persist assistant message
         var cleanedContent = ContentCleaner.Clean(fullContent.ToString());
         var assistantMsg = new ChatMessage
@@ -757,7 +766,18 @@ public class DaisiBotChatService : IChatService
             Role = ChatRole.Assistant,
             Content = cleanedContent,
             Type = lastType,
-            SortOrder = conversation.Messages.Count + 1
+            SortOrder = conversation.Messages.Count + 1,
+            TokenCount = lastMessageTokenCount,
+            ComputeTimeMs = lastComputeTimeMs,
+            TokensPerSecond = tokensPerSecond
+        };
+
+        _lastStats = new ChatStats
+        {
+            LastMessageTokenCount = lastMessageTokenCount,
+            SessionTokenCount = lastSessionTokenCount,
+            LastMessageComputeTimeMs = lastComputeTimeMs,
+            TokensPerSecond = tokensPerSecond
         };
 
         await _conversationStore.AddMessageAsync(assistantMsg);
@@ -774,7 +794,7 @@ public class DaisiBotChatService : IChatService
         yield return new StreamChunk(string.Empty, "Complete", true);
     }
 
-    private async IAsyncEnumerable<StreamChunk> StreamLocalChunksAsync(
+    private async IAsyncEnumerable<SendInferenceResponse> StreamLocalChunksAsync(
         SendInferenceRequest sendRequest,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -792,7 +812,7 @@ public class DaisiBotChatService : IChatService
 
         if (initError is not null)
         {
-            yield return new StreamChunk($"Error: {initError}", "Error", true);
+            yield return new SendInferenceResponse { Content = $"Error: {initError}", Type = InferenceResponseTypes.Error };
             yield break;
         }
 
@@ -814,13 +834,13 @@ public class DaisiBotChatService : IChatService
 
             if (iterError is not null)
             {
-                yield return new StreamChunk($"Error: {iterError}", "Error", true);
+                yield return new SendInferenceResponse { Content = $"Error: {iterError}", Type = InferenceResponseTypes.Error };
                 yield break;
             }
 
             if (hasNext && current is not null)
             {
-                yield return new StreamChunk(current.Content, current.Type.ToString(), false);
+                yield return current;
             }
         }
 
