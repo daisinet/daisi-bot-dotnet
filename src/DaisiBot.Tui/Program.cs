@@ -40,7 +40,11 @@ builder.Services.AddSingleton<InferenceService>();
 builder.Services.AddSingleton<ToolService>();
 builder.Services.AddSingleton<ILocalInferenceService, LocalInferenceService>();
 
+builder.Services.AddHttpClient();
+
 var host = builder.Build();
+
+DaisiStaticSettings.Services = host.Services;
 
 // Ensure database created and schema up to date, then apply saved connection settings
 using (var scope = host.Services.CreateScope())

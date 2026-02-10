@@ -34,6 +34,12 @@ public class SlashCommandDispatcher
         _handlers["export"] = new ExportCommandHandler(services, context).HandleAsync;
         _handlers["status"] = new StatusCommandHandler(services, this).HandleAsync;
         _handlers["runnow"] = new RunNowCommandHandler(services, this).HandleAsync;
+
+        if (context == "bot")
+        {
+            _handlers["start"] = new StartCommandHandler(services, this).HandleAsync;
+            _handlers["stop"] = new StopCommandHandler(services, this).HandleAsync;
+        }
     }
 
     public async Task<string?> DispatchAsync(SlashCommand command)
