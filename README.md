@@ -25,9 +25,9 @@ All projects target **.NET 10.0**.
 
 Shared domain layer with no external dependencies. Defines:
 
-- **Models**: `Conversation`, `ChatMessage`, `AgentConfig`, `AuthState`, `UserSettings`, `Skill`, `AvailableModel`, `ChatStats`
-- **Interfaces**: `IAuthService`, `IChatService`, `IConversationStore`, `ISettingsService`, `IModelService`, `ISkillService`
-- **Enums**: `ConversationThinkLevel` (Basic → TreeOfThought), `ChatMessageType` (Text, Thinking, Tooling, Error, etc.), `ToolGroupSelection` (8 categories of agent tools), `ChatRole`, `SkillStatus`, `SkillVisibility`
+- **Models**: `Conversation`, `ChatMessage`, `AgentConfig`, `AuthState`, `UserSettings`, `Skill`, `AvailableModel`, `ChatStats`, `BotInstance`, `BotLogEntry`, `SlashCommand`
+- **Interfaces**: `IAuthService`, `IChatService`, `IConversationStore`, `ISettingsService`, `IModelService`, `ISkillService`, `IBotEngine`, `IBotStore`
+- **Enums**: `ConversationThinkLevel` (Basic → TreeOfThought), `ChatMessageType` (Text, Thinking, Tooling, Error, etc.), `ToolGroupSelection` (8 categories of agent tools), `ChatRole`, `SkillStatus`, `SkillVisibility`, `BotStatus` (Idle/Running/WaitingForInput/Completed/Failed/Stopped), `BotScheduleType` (Once/Continuous/Interval/Hourly/Daily), `BotLogLevel`
 - **Security**: `ToolPermissions` for elevated access control, `EmployeeCheck` for internal authorization
 
 ### DaisiBot.Agent
@@ -41,17 +41,28 @@ Service implementations that integrate with the DAISI SDK via gRPC:
 - **SkillPromptBuilder** — Injects enabled skill system prompt templates into the conversation context.
 - **EnumMapper** — Bidirectional mapping between Core enums and DAISI protobuf types.
 
+**Bot Engine** (`BotEngine.cs`):
+- Autonomous bot execution with plan-execute-synthesize loop
+- AI-generated action plans broken into 2-5 steps, each executed with tool access
+- Scheduler timer checks for runnable bots every 30 seconds (first check 2s after startup)
+- Five schedule types: Once, Continuous, Interval (custom minutes), Hourly, Daily
+- Failure recovery: on error, prompts user for guidance via `WaitForInputAsync`, stores response as `RetryGuidance` that is injected into planning and execution prompts on retry
+- `WaitForInputAsync` blocks execution with a `TaskCompletionSource` until user responds
+- Concurrent bot management via `ConcurrentDictionary<Guid, BotRuntime>` with per-bot cancellation tokens and output channels
+
 DI registration is handled by `AddDaisiBotAgent()` extension method.
 
 ### DaisiBot.Data
 
 SQLite database layer using EF Core. Database location: `%LocalAppData%\DaisiBot\daisibot.db`.
 
-- **DaisiBotDbContext** — DbSets for Conversations, Messages, Settings, AuthStates, InstalledSkills. Conversations cascade-delete their messages.
+- **DaisiBotDbContext** — DbSets for Conversations, Messages, Settings, AuthStates, InstalledSkills, Bots, BotLogEntries. Conversations cascade-delete their messages. `ApplyMigrationsAsync()` handles schema drift with ALTER TABLE migrations for new columns.
 - **SqliteConversationStore** — CRUD for conversations and messages, ordered by last update.
 - **SqliteAuthStateStore** — Singleton upsert pattern (ID=1) for auth token persistence.
-- **SqliteSettingsService** — Singleton upsert for user preferences.
+- **SqliteSettingsService** — Singleton upsert for user preferences (includes `LastScreen` for UI state persistence).
 - **SqliteInstalledSkillStore** — Tracks installed skills per account.
+- **SqliteBotStore** — CRUD for bot instances and log entries, with `GetRunnableAsync()` for scheduler queries.
+- **SqliteSkillService** — Skill marketplace queries.
 
 ### DaisiBot.Shared.UI
 
@@ -73,25 +84,52 @@ Terminal-based client using raw `System.Console` and ANSI escape codes (no exter
 - `ConcurrentQueue<Action>` for thread-safe UI updates from async tasks
 - `App.Post(Action)` lets background operations safely update the display
 - Modal dialog stack (`IModal`) for layered UI
+- `IScreen` interface with `Draw()`, `HandleKey()`, and `Activate()` for screen lifecycle
 - Windows VT100 terminal processing enabled via P/Invoke
 
 **Rendering** (`AnsiConsole.cs`):
-- Cursor positioning, foreground/background colors, bold/dim/reverse styles
+- Cursor positioning, foreground/background colors (including RGB), bold/dim/reverse/underline styles
 - Unicode box-drawing characters for borders and panels
 - Alternate screen buffer for clean terminal restore on exit
 
-**Layout** (`MainScreen.cs`):
+**Screen Router** (`ScreenRouter.cs`):
+- F1/F2 switches between Bots and Chats screens, F10 quits
+- Persists last active screen to `UserSettings.LastScreen` — restored on next launch
+- Default screen: Bots
+
+**Layout** — Two screens sharing the same structure:
 ```
-Row 0:       Title bar ("Daisi Bot - Welcome, {user}")
-Row 1..H-2:  [Sidebar 24 cols] | [Chat panel, rest of width]
-Row H-1:     Status bar (F2:Model F3:Settings F4:Login F5:Skills F10:Quit)
+Row 0:       Title bar
+Row 1..H-2:  [Sidebar 24 cols] | [Content panel, rest of width]
+Row H-1:     Status bar (F1:Bots F2:Chats F3:Model F4:Settings F5:Login F6:Skills F10:Quit)
 ```
 
-**Panels**:
+**Bot Screen** (`BotMainScreen.cs`):
+- `BotSidebarPanel` — Bot list with status icons (▶ Running, ○ Idle, ⚠ WaitingForInput with flash animation, ✓ Completed, ✗ Failed, ■ Stopped)
+- `BotOutputPanel` — Scrollable log output with color-coded entries: bold magenta for steps, bold cyan with background highlight for results, bold red for errors, yellow for warnings. Left padding, input sanitization to prevent sidebar overwrite. Visible cursor at typing position.
+
+**Chat Screen** (`MainScreen.cs`):
 - `SidebarPanel` — Conversation list with keyboard navigation (Up/Down/Enter/N/Delete)
 - `ChatPanel` — Word-wrapped message display with scrolling, full line editing, streaming output
 
-**Dialogs**: `LoginFlow`, `ModelPickerFlow`, `SettingsFlow`, `SkillBrowserFlow` — all modal, async operations run on thread pool and post results back via `App.Post()`
+**Shared UI Features**:
+- Active panel border highlights in green, title text bold green when focused
+- Tab toggles focus between sidebar and content panel
+- Selecting an item in the sidebar auto-focuses the command line
+- First item auto-selected on screen activation; focus returns to sidebar when last item is deleted
+
+**Slash Command System**:
+- `SlashCommandPopup` — Inline autocomplete popup above the input line, showing top 5 matching commands as user types after `/`. Up/Down to navigate, Tab/Enter to complete. Commands without parameters auto-execute on selection.
+- `SlashCommandDispatcher` — Routes commands to handlers. Context-aware: `CurrentBot`/`CurrentConversation` set on selection change.
+- **Commands**: `/help`, `/new`, `/list`, `/status`, `/kill`, `/runnow`, `/clear`, `/model`, `/settings`, `/skills`, `/export`, `/install <skill>`, `/login`
+- `/kill` — Context-aware, shows confirmation dialog, stops and deletes the bot
+- `/runnow` — Runs the selected bot immediately without affecting its schedule
+- `/status` — Shows detailed status of the selected bot or all bots
+
+**Dialogs**: `LoginFlow`, `ModelPickerFlow`, `SettingsFlow`, `SkillBrowserFlow`, `BotCreationFlow`, `HelpModal`, `ConfirmDialog` — all modal, async operations run on thread pool and post results back via `App.Post()`
+
+**Bot Creation Flow** (`BotCreationFlow.cs`):
+Multi-step wizard: Goal → Label → Persona → Schedule → (Interval minutes if applicable) → Start Mode (Run Immediately / Schedule First Run) → Create
 
 ### DaisiBot.Maui
 
