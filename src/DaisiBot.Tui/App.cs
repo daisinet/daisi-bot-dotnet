@@ -59,6 +59,20 @@ public class App
     }
 
     /// <summary>
+    /// Switch to a different main screen.
+    /// </summary>
+    public void SetScreen(IScreen screen)
+    {
+        _mainScreen = screen;
+        AnsiConsole.ClearScreen();
+        _mainScreen.Activate();
+        _mainScreen.Draw();
+        if (_modalStack.Count > 0)
+            _modalStack.Peek().Draw();
+        AnsiConsole.Flush();
+    }
+
+    /// <summary>
     /// Request the app to quit.
     /// </summary>
     public void Quit() => _running = false;
@@ -84,6 +98,7 @@ public class App
 
         // Initial draw
         AnsiConsole.ClearScreen();
+        screen.Activate();
         screen.Draw();
         AnsiConsole.Flush();
 
@@ -145,6 +160,8 @@ public interface IScreen
 {
     void Draw();
     void HandleKey(ConsoleKeyInfo key);
+    /// <summary>Called when this screen becomes the active screen.</summary>
+    void Activate() { }
 }
 
 /// <summary>

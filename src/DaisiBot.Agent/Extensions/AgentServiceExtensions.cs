@@ -1,6 +1,7 @@
 using Daisi.SDK.Extensions;
 using Daisi.SDK.Interfaces.Authentication;
 using DaisiBot.Agent.Auth;
+using DaisiBot.Agent.Bots;
 using DaisiBot.Agent.Chat;
 using DaisiBot.Agent.Models;
 using DaisiBot.Core.Interfaces;
@@ -34,7 +35,12 @@ public static class AgentServiceExtensions
         // Data stores
         services.AddTransient<IConversationStore, SqliteConversationStore>();
         services.AddTransient<ISettingsService, SqliteSettingsService>();
+        services.AddTransient<ISkillService, SqliteSkillService>();
         services.AddTransient<SqliteInstalledSkillStore>();
+
+        // Bots
+        services.AddTransient<IBotStore, SqliteBotStore>();
+        services.AddSingleton<IBotEngine, BotEngine>();
 
         return services;
     }

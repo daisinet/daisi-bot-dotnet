@@ -36,7 +36,7 @@ public class SidebarPanel
         _conversationStore = conversationStore;
     }
 
-    public void LoadConversations()
+    public void LoadConversations(Action? onLoaded = null)
     {
         Task.Run(async () =>
         {
@@ -48,6 +48,7 @@ public class SidebarPanel
                     _selectedIndex = Math.Max(0, _conversations.Count - 1);
                 Draw();
                 AnsiConsole.Flush();
+                onLoaded?.Invoke();
             });
         });
     }
@@ -55,15 +56,17 @@ public class SidebarPanel
     public void Draw()
     {
         // Title
-        var titleBar = HasFocus ? " Conversations " : " Conversations ";
-        AnsiConsole.WriteAt(Top, Left, "\u250C"); // ┌
+        var titleBar = " Conversations ";
+        SetBorderColor();
+        AnsiConsole.WriteAt(Top, Left, "\u250C");
         var titleLen = Math.Min(titleBar.Length, Width - 2);
-        AnsiConsole.WriteAt(Top, Left + 1, new string('\u2500', Width - 2)); // ─
-        AnsiConsole.WriteAt(Top, Left + Width - 1, "\u2510"); // ┐
-        // Center title
+        AnsiConsole.WriteAt(Top, Left + 1, new string('\u2500', Width - 2));
+        AnsiConsole.WriteAt(Top, Left + Width - 1, "\u2510");
+        ResetBorderColor();
         var titleStart = Left + (Width - titleLen) / 2;
         if (HasFocus)
         {
+            AnsiConsole.SetForeground(ConsoleColor.Green);
             AnsiConsole.SetBold();
             AnsiConsole.WriteAt(Top, titleStart, titleBar[..titleLen]);
             AnsiConsole.ResetStyle();
@@ -74,10 +77,9 @@ public class SidebarPanel
         }
 
         // List area
-        var listHeight = Height - 2; // minus top and bottom border
+        var listHeight = Height - 2;
         var visibleCount = listHeight;
 
-        // Ensure selected item is visible
         if (_selectedIndex < _scrollOffset)
             _scrollOffset = _selectedIndex;
         if (_selectedIndex >= _scrollOffset + visibleCount)
@@ -88,13 +90,15 @@ public class SidebarPanel
             var row = Top + 1 + i;
             var idx = _scrollOffset + i;
 
-            AnsiConsole.WriteAt(row, Left, "\u2502"); // │
+            SetBorderColor();
+            AnsiConsole.WriteAt(row, Left, "\u2502");
+            ResetBorderColor();
 
             if (idx < _conversations.Count)
             {
                 var conv = _conversations[idx];
                 var title = conv.Title;
-                var maxLen = Width - 3; // borders + padding
+                var maxLen = Width - 3;
                 if (title.Length > maxLen)
                     title = title[..(maxLen - 2)] + "..";
 
@@ -110,16 +114,19 @@ public class SidebarPanel
                 AnsiConsole.WriteAt(row, Left + 1, new string(' ', Width - 2));
             }
 
-            AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502"); // │
+            SetBorderColor();
+            AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502");
+            ResetBorderColor();
         }
 
         // Bottom border
         var bottomRow = Top + Height - 1;
-        AnsiConsole.WriteAt(bottomRow, Left, "\u2514"); // └
-        AnsiConsole.WriteAt(bottomRow, Left + 1, new string('\u2500', Width - 2)); // ─
-        AnsiConsole.WriteAt(bottomRow, Left + Width - 1, "\u2518"); // ┘
+        SetBorderColor();
+        AnsiConsole.WriteAt(bottomRow, Left, "\u2514");
+        AnsiConsole.WriteAt(bottomRow, Left + 1, new string('\u2500', Width - 2));
+        AnsiConsole.WriteAt(bottomRow, Left + Width - 1, "\u2518");
+        ResetBorderColor();
 
-        // Hints at bottom
         var hints = " N:New D:Del ";
         if (hints.Length <= Width - 2)
         {
@@ -128,6 +135,16 @@ public class SidebarPanel
             AnsiConsole.WriteAt(bottomRow, hintStart, hints);
             AnsiConsole.ResetStyle();
         }
+    }
+
+    private void SetBorderColor()
+    {
+        if (HasFocus) AnsiConsole.SetForeground(ConsoleColor.Green);
+    }
+
+    private void ResetBorderColor()
+    {
+        if (HasFocus) AnsiConsole.ResetStyle();
     }
 
     public bool HandleKey(ConsoleKeyInfo key)
@@ -176,6 +193,18 @@ public class SidebarPanel
         }
 
         return false;
+    }
+
+    public bool HasItems => _conversations.Count > 0;
+
+    public void SelectFirst()
+    {
+        if (_conversations.Count > 0)
+        {
+            _selectedIndex = 0;
+            _scrollOffset = 0;
+            NotifySelection();
+        }
     }
 
     private void NotifySelection()

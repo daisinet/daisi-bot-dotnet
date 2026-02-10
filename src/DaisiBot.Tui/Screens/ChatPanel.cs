@@ -2,6 +2,7 @@ using System.Text;
 using DaisiBot.Core.Enums;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
+using DaisiBot.Tui.Commands;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DaisiBot.Tui.Screens;
@@ -22,6 +23,10 @@ public class ChatPanel
     private readonly StringBuilder _inputBuffer = new();
     private int _cursorPos;
 
+    // Slash command autocomplete
+    private readonly SlashCommandPopup _slashPopup = new();
+    private int _lastPopupVisibleCount;
+
     // Message display
     private readonly List<string> _displayLines = [];
     private int _scrollOffset;
@@ -34,6 +39,8 @@ public class ChatPanel
     public int Width { get; set; }
     public int Height { get; set; }
     public bool HasFocus { get; set; }
+
+    public SlashCommandDispatcher? CommandDispatcher { get; set; }
 
     // Height breakdown: title(1) + messages(H-4) + stats(1) + input(1) + bottom_border(1)
     private int MessageAreaTop => Top + 1;
@@ -70,15 +77,18 @@ public class ChatPanel
         var contentWidth = Width - 2;
 
         // Title bar
+        SetBorderColor();
         AnsiConsole.WriteAt(Top, Left, "\u250C");
         AnsiConsole.WriteAt(Top, Left + 1, new string('\u2500', Width - 2));
         AnsiConsole.WriteAt(Top, Left + Width - 1, "\u2510");
+        ResetBorderColor();
         var title = _conversation is not null
             ? $" Chat: {Truncate(_conversation.Title, contentWidth - 8)} "
             : " Chat ";
         var titleStart = Left + (Width - Math.Min(title.Length, contentWidth)) / 2;
         if (HasFocus)
         {
+            AnsiConsole.SetForeground(ConsoleColor.Green);
             AnsiConsole.SetBold();
             AnsiConsole.WriteAt(Top, titleStart, title, contentWidth);
             AnsiConsole.ResetStyle();
@@ -92,20 +102,29 @@ public class ChatPanel
         DrawMessages();
 
         // Stats line
+        SetBorderColor();
         AnsiConsole.WriteAt(StatsRow, Left, "\u2502");
+        ResetBorderColor();
         AnsiConsole.SetDim();
         AnsiConsole.WriteAt(StatsRow, Left + 1, Truncate(_statsText, contentWidth).PadRight(contentWidth));
         AnsiConsole.ResetStyle();
+        SetBorderColor();
         AnsiConsole.WriteAt(StatsRow, Left + Width - 1, "\u2502");
+        ResetBorderColor();
 
         // Input line
         DrawInputLine();
 
+        // Slash command popup (above input line)
+        _slashPopup.Draw(InputRow, Left, Width);
+
         // Bottom border
         var bottomRow = Top + Height - 1;
+        SetBorderColor();
         AnsiConsole.WriteAt(bottomRow, Left, "\u2514");
         AnsiConsole.WriteAt(bottomRow, Left + 1, new string('\u2500', Width - 2));
         AnsiConsole.WriteAt(bottomRow, Left + Width - 1, "\u2518");
+        ResetBorderColor();
 
         // Hints
         var hints = _isStreaming ? " Esc:Stop " : " Enter:Send ";
@@ -147,7 +166,9 @@ public class ChatPanel
             var row = MessageAreaTop + i;
             var lineIdx = _scrollOffset + i;
 
+            SetBorderColor();
             AnsiConsole.WriteAt(row, Left, "\u2502");
+            ResetBorderColor();
 
             if (lineIdx < _displayLines.Count)
             {
@@ -183,14 +204,18 @@ public class ChatPanel
                 AnsiConsole.WriteAt(row, Left + 1, new string(' ', contentWidth));
             }
 
+            SetBorderColor();
             AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502");
+            ResetBorderColor();
         }
     }
 
     private void DrawInputLine()
     {
         var contentWidth = Width - 2;
+        SetBorderColor();
         AnsiConsole.WriteAt(InputRow, Left, "\u2502");
+        ResetBorderColor();
 
         var prompt = "> ";
         var inputMaxLen = contentWidth - prompt.Length;
@@ -204,7 +229,20 @@ public class ChatPanel
         AnsiConsole.WriteAt(InputRow, Left + 1 + prompt.Length,
             displayInput.PadRight(contentWidth - prompt.Length));
 
+        SetBorderColor();
         AnsiConsole.WriteAt(InputRow, Left + Width - 1, "\u2502");
+        ResetBorderColor();
+
+        // Reposition cursor
+        if (HasFocus && !_isStreaming)
+        {
+            var cursorCol = Left + 3 + _cursorPos; // "│> " prefix
+            if (cursorCol < Left + Width - 1)
+            {
+                AnsiConsole.MoveTo(InputRow, cursorCol);
+                AnsiConsole.ShowCursor();
+            }
+        }
     }
 
     public bool HandleKey(ConsoleKeyInfo key)
@@ -222,6 +260,41 @@ public class ChatPanel
             return false;
         }
 
+        // Slash command popup intercepts keys when visible
+        if (_slashPopup.IsVisible)
+        {
+            if (_slashPopup.HandleKey(key))
+            {
+                if (key.Key is ConsoleKey.Tab or ConsoleKey.Enter)
+                {
+                    var requiresArgs = _slashPopup.SelectedRequiresArgs;
+                    var completion = _slashPopup.GetCompletion();
+                    if (completion is not null)
+                    {
+                        _inputBuffer.Clear();
+                        _inputBuffer.Append(completion);
+                        _cursorPos = _inputBuffer.Length;
+                    }
+                    _slashPopup.Clear(InputRow, Left, Width, _lastPopupVisibleCount);
+                    _slashPopup.Hide();
+                    _lastPopupVisibleCount = 0;
+                    DrawMessages(); // repaint area the popup covered
+                    DrawInputLine();
+                    AnsiConsole.Flush();
+
+                    if (!requiresArgs)
+                        SendMessage();
+                }
+                else
+                {
+                    // Up/Down/Esc — just redraw popup
+                    RedrawPopupArea();
+                    AnsiConsole.Flush();
+                }
+                return true;
+            }
+        }
+
         switch (key.Key)
         {
             case ConsoleKey.Enter:
@@ -233,7 +306,7 @@ public class ChatPanel
                 {
                     _inputBuffer.Remove(_cursorPos - 1, 1);
                     _cursorPos--;
-                    DrawInputLine();
+                    OnInputChanged();
                 }
                 return true;
 
@@ -241,7 +314,7 @@ public class ChatPanel
                 if (_cursorPos < _inputBuffer.Length)
                 {
                     _inputBuffer.Remove(_cursorPos, 1);
-                    DrawInputLine();
+                    OnInputChanged();
                 }
                 return true;
 
@@ -288,7 +361,7 @@ public class ChatPanel
                 {
                     _inputBuffer.Insert(_cursorPos, key.KeyChar);
                     _cursorPos++;
-                    DrawInputLine();
+                    OnInputChanged();
                     return true;
                 }
                 break;
@@ -297,12 +370,92 @@ public class ChatPanel
         return false;
     }
 
+    private void OnInputChanged()
+    {
+        var prevCount = _lastPopupVisibleCount;
+        _slashPopup.UpdateFilter(_inputBuffer.ToString());
+
+        if (!_slashPopup.IsVisible && prevCount > 0)
+        {
+            _slashPopup.Clear(InputRow, Left, Width, prevCount);
+            _lastPopupVisibleCount = 0;
+            DrawMessages();
+        }
+        else if (_slashPopup.IsVisible)
+        {
+            if (prevCount > 0)
+                _slashPopup.Clear(InputRow, Left, Width, prevCount);
+            _slashPopup.Draw(InputRow, Left, Width);
+            _lastPopupVisibleCount = _slashPopup.VisibleCount;
+        }
+
+        DrawInputLine();
+        AnsiConsole.Flush();
+    }
+
+    private void RedrawPopupArea()
+    {
+        if (_slashPopup.IsVisible)
+        {
+            if (_lastPopupVisibleCount > 0)
+                _slashPopup.Clear(InputRow, Left, Width, _lastPopupVisibleCount);
+            _slashPopup.Draw(InputRow, Left, Width);
+            _lastPopupVisibleCount = _slashPopup.VisibleCount;
+        }
+        else if (_lastPopupVisibleCount > 0)
+        {
+            _slashPopup.Clear(InputRow, Left, Width, _lastPopupVisibleCount);
+            _lastPopupVisibleCount = 0;
+            DrawMessages();
+        }
+    }
+
     private void SendMessage()
     {
-        if (_conversation is null) return;
-
         var input = _inputBuffer.ToString().Trim();
         if (string.IsNullOrWhiteSpace(input)) return;
+
+        // Dismiss popup if open
+        if (_slashPopup.IsVisible || _lastPopupVisibleCount > 0)
+        {
+            _slashPopup.Clear(InputRow, Left, Width, _lastPopupVisibleCount);
+            _slashPopup.Hide();
+            _lastPopupVisibleCount = 0;
+        }
+
+        // Check for slash commands first
+        if (SlashCommandParser.IsSlashCommand(input) && CommandDispatcher is not null)
+        {
+            _inputBuffer.Clear();
+            _cursorPos = 0;
+            var cmd = SlashCommandParser.Parse(input);
+            Task.Run(async () =>
+            {
+                var result = await CommandDispatcher.DispatchAsync(cmd);
+                if (result is not null)
+                {
+                    _app.Post(() =>
+                    {
+                        if (result == "__CLEAR__")
+                        {
+                            _displayLines.Clear();
+                            _scrollOffset = 0;
+                        }
+                        else
+                        {
+                            AddDisplayLine($"[System] {result}");
+                            ScrollToEnd();
+                        }
+                        Draw();
+                        AnsiConsole.Flush();
+                    });
+                }
+            });
+            DrawInputLine();
+            return;
+        }
+
+        if (_conversation is null) return;
 
         _inputBuffer.Clear();
         _cursorPos = 0;
@@ -471,17 +624,29 @@ public class ChatPanel
             return result;
         }
 
-        var remaining = text;
-        while (remaining.Length > maxWidth)
+        // Split on newlines first, then wrap each line
+        var lines = text.Split('\n');
+        foreach (var line in lines)
         {
-            var breakPos = remaining.LastIndexOf(' ', maxWidth);
-            if (breakPos <= 0) breakPos = maxWidth;
+            var clean = line.TrimEnd('\r');
+            if (clean.Length == 0)
+            {
+                result.Add("");
+                continue;
+            }
 
-            result.Add(remaining[..breakPos]);
-            remaining = remaining[breakPos..].TrimStart();
+            var remaining = clean;
+            while (remaining.Length > maxWidth)
+            {
+                var breakPos = remaining.LastIndexOf(' ', maxWidth);
+                if (breakPos <= 0) breakPos = maxWidth;
+
+                result.Add(remaining[..breakPos]);
+                remaining = remaining[breakPos..].TrimStart();
+            }
+            if (remaining.Length > 0)
+                result.Add(remaining);
         }
-        if (remaining.Length > 0)
-            result.Add(remaining);
 
         return result;
     }
@@ -489,6 +654,16 @@ public class ChatPanel
     private void ScrollToEnd()
     {
         _scrollOffset = Math.Max(0, _displayLines.Count - MessageAreaHeight);
+    }
+
+    private void SetBorderColor()
+    {
+        if (HasFocus) AnsiConsole.SetForeground(ConsoleColor.Green);
+    }
+
+    private void ResetBorderColor()
+    {
+        if (HasFocus) AnsiConsole.ResetStyle();
     }
 
     private static string Truncate(string s, int max) =>

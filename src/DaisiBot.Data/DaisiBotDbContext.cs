@@ -1,6 +1,9 @@
+using System.Text.Json;
+using DaisiBot.Core.Enums;
 using DaisiBot.Core.Models;
 using DaisiBot.Core.Models.Skills;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace DaisiBot.Data;
 
@@ -11,6 +14,9 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
     public DbSet<UserSettings> Settings => Set<UserSettings>();
     public DbSet<AuthState> AuthStates => Set<AuthState>();
     public DbSet<InstalledSkill> InstalledSkills => Set<InstalledSkill>();
+    public DbSet<Skill> Skills => Set<Skill>();
+    public DbSet<BotInstance> Bots => Set<BotInstance>();
+    public DbSet<BotLogEntry> BotLogEntries => Set<BotLogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +49,28 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         modelBuilder.Entity<InstalledSkill>(e =>
         {
             e.HasKey(i => new { i.SkillId, i.AccountId });
+        });
+
+        modelBuilder.Entity<Skill>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.RequiredToolGroups).HasConversion(
+                v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                v => JsonSerializer.Deserialize<List<ToolGroupSelection>>(v, (JsonSerializerOptions?)null) ?? new List<ToolGroupSelection>());
+            e.Property(s => s.Tags).HasConversion(
+                v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
+        });
+
+        modelBuilder.Entity<BotInstance>(e =>
+        {
+            e.HasKey(b => b.Id);
+        });
+
+        modelBuilder.Entity<BotLogEntry>(e =>
+        {
+            e.HasKey(l => l.Id);
+            e.HasIndex(l => l.BotId);
         });
     }
 
@@ -85,6 +113,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             ("GpuLayerCount", "ALTER TABLE Settings ADD COLUMN GpuLayerCount INTEGER NOT NULL DEFAULT -1"),
             ("BatchSize", "ALTER TABLE Settings ADD COLUMN BatchSize INTEGER NOT NULL DEFAULT 512"),
             ("NetworkHostEnabled", "ALTER TABLE Settings ADD COLUMN NetworkHostEnabled INTEGER NOT NULL DEFAULT 0"),
+            ("LastScreen", "ALTER TABLE Settings ADD COLUMN LastScreen TEXT NOT NULL DEFAULT 'bots'"),
         ];
 
         foreach (var (name, sql) in migrations)
@@ -92,6 +121,105 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             if (existingColumns.Contains(name)) continue;
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Ensure Skills table exists for older databases
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS Skills (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Name TEXT NOT NULL DEFAULT '',
+                    Description TEXT NOT NULL DEFAULT '',
+                    ShortDescription TEXT NOT NULL DEFAULT '',
+                    Author TEXT NOT NULL DEFAULT '',
+                    AccountId TEXT NOT NULL DEFAULT '',
+                    Version TEXT NOT NULL DEFAULT '1.0.0',
+                    IconUrl TEXT NOT NULL DEFAULT '',
+                    RequiredToolGroups TEXT NOT NULL DEFAULT '[]',
+                    Tags TEXT NOT NULL DEFAULT '[]',
+                    Visibility INTEGER NOT NULL DEFAULT 0,
+                    Status INTEGER NOT NULL DEFAULT 0,
+                    ReviewedBy TEXT,
+                    ReviewedAt TEXT,
+                    RejectionReason TEXT,
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NOT NULL,
+                    DownloadCount INTEGER NOT NULL DEFAULT 0,
+                    SystemPromptTemplate TEXT NOT NULL DEFAULT ''
+                )
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Ensure Bots table exists
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS Bots (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Label TEXT NOT NULL DEFAULT 'New Bot',
+                    Goal TEXT NOT NULL DEFAULT '',
+                    Persona TEXT,
+                    Status INTEGER NOT NULL DEFAULT 0,
+                    LastError TEXT,
+                    RetryGuidance TEXT,
+                    ScheduleType INTEGER NOT NULL DEFAULT 0,
+                    ScheduleIntervalMinutes INTEGER NOT NULL DEFAULT 0,
+                    NextRunAt TEXT,
+                    ModelName TEXT NOT NULL DEFAULT '',
+                    Temperature REAL NOT NULL DEFAULT 0.7,
+                    MaxTokens INTEGER NOT NULL DEFAULT 32000,
+                    EnabledSkillIdsCsv TEXT NOT NULL DEFAULT '',
+                    PendingQuestion TEXT,
+                    ExecutionCount INTEGER NOT NULL DEFAULT 0,
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NOT NULL,
+                    LastRunAt TEXT
+                )
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Ensure BotLogEntries table exists
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS BotLogEntries (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    BotId TEXT NOT NULL,
+                    ExecutionNumber INTEGER NOT NULL DEFAULT 0,
+                    Level INTEGER NOT NULL DEFAULT 0,
+                    Message TEXT NOT NULL DEFAULT '',
+                    Detail TEXT,
+                    Timestamp TEXT NOT NULL
+                )
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Index on BotLogEntries.BotId
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_BotLogEntries_BotId ON BotLogEntries (BotId)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Add RetryGuidance column to Bots if missing
+        var botColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(Bots)";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                botColumns.Add(reader.GetString(1));
+        }
+
+        if (!botColumns.Contains("RetryGuidance"))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "ALTER TABLE Bots ADD COLUMN RetryGuidance TEXT";
             await cmd.ExecuteNonQueryAsync();
         }
     }

@@ -27,6 +27,9 @@ public class UserSettings
     public uint BatchSize { get; set; } = 512;
     public bool NetworkHostEnabled { get; set; }
 
+    // UI state
+    public string LastScreen { get; set; } = "bots";
+
     public List<ToolGroupSelection> GetEnabledToolGroups()
     {
         if (string.IsNullOrWhiteSpace(EnabledToolGroupsCsv))

@@ -59,5 +59,17 @@ await authService.InitializeAsync();
 
 // Run TUI with raw console
 var app = new App(host.Services);
-var mainScreen = new MainScreen(app);
-app.Run(mainScreen);
+var chatScreen = new MainScreen(app);
+var botScreen = new BotMainScreen(app);
+var router = new ScreenRouter(app, chatScreen, botScreen);
+chatScreen.ScreenRouter = router;
+botScreen.ScreenRouter = router;
+
+// Restore last screen (default: bots)
+var lastScreen = "bots";
+{
+    var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
+    var userSettings = await settingsSvc.GetSettingsAsync();
+    lastScreen = userSettings.LastScreen;
+}
+app.Run(router.GetScreen(lastScreen));

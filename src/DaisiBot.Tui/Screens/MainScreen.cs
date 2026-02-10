@@ -1,5 +1,6 @@
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
+using DaisiBot.Tui.Commands;
 using DaisiBot.Tui.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,6 +25,8 @@ public class MainScreen : IScreen
 
     private const int SidebarWidth = 24;
 
+    public ScreenRouter? ScreenRouter { get; set; }
+
     private enum FocusTarget { Sidebar, Chat }
     private FocusTarget _focus = FocusTarget.Sidebar;
 
@@ -37,6 +40,7 @@ public class MainScreen : IScreen
 
         _sidebar = new SidebarPanel(app, _conversationStore);
         _chatPanel = new ChatPanel(app, _services);
+        _chatPanel.CommandDispatcher = new SlashCommandDispatcher(app, _services, "chat");
 
         _sidebar.ConversationSelected += OnConversationSelected;
         _sidebar.NewConversationRequested += OnNewConversation;
@@ -66,7 +70,11 @@ public class MainScreen : IScreen
                 AnsiConsole.Flush();
             });
 
-            _sidebar.LoadConversations();
+            _sidebar.LoadConversations(onLoaded: () =>
+            {
+                if (_sidebar.HasItems)
+                    _sidebar.SelectFirst();
+            });
 
             if (!authState.IsAuthenticated)
             {
@@ -84,6 +92,21 @@ public class MainScreen : IScreen
         _titleText = state.IsAuthenticated
             ? $"Daisi Bot - Welcome, {state.UserName}"
             : "Daisi Bot - Not logged in";
+    }
+
+    public void Activate()
+    {
+        // Auto-select first conversation and focus command line
+        if (_sidebar.HasItems)
+        {
+            _sidebar.SelectFirst();
+            // OnConversationSelected handler will set focus to Chat
+        }
+        else
+        {
+            _focus = FocusTarget.Sidebar;
+            UpdateFocus();
+        }
     }
 
     public void Draw()
@@ -120,7 +143,7 @@ public class MainScreen : IScreen
     {
         var w = _app.Width;
         var row = _app.Height - 1;
-        var bar = " F2:Model  F3:Settings  F4:Login  F5:Skills  F10:Quit ";
+        var bar = " F1:Bots  F2:Chats  F3:Model  F4:Settings  F5:Login  F6:Skills  F10:Quit ";
         AnsiConsole.SetReverse();
         var padded = bar.Length >= w ? bar[..w] : bar + new string(' ', w - bar.Length);
         AnsiConsole.WriteAt(row, 0, padded);
@@ -129,23 +152,24 @@ public class MainScreen : IScreen
 
     public void HandleKey(ConsoleKeyInfo key)
     {
-        // Global F-keys first
+        // Screen router handles F1/F2/F10
+        if (ScreenRouter?.HandleGlobalKey(key) == true)
+            return;
+
+        // Screen-local F-keys
         switch (key.Key)
         {
-            case ConsoleKey.F2:
+            case ConsoleKey.F3:
                 ShowModelPicker();
                 return;
-            case ConsoleKey.F3:
+            case ConsoleKey.F4:
                 ShowSettings();
                 return;
-            case ConsoleKey.F4:
+            case ConsoleKey.F5:
                 ShowLogin();
                 return;
-            case ConsoleKey.F5:
+            case ConsoleKey.F6:
                 ShowSkillBrowser();
-                return;
-            case ConsoleKey.F10:
-                _app.Quit();
                 return;
             case ConsoleKey.Tab:
                 ToggleFocus();
@@ -185,6 +209,9 @@ public class MainScreen : IScreen
     private void OnConversationSelected(Conversation conversation)
     {
         _currentConversation = conversation;
+        _chatPanel.CommandDispatcher!.CurrentConversation = conversation;
+        _focus = FocusTarget.Chat;
+        UpdateFocus();
         Task.Run(async () =>
         {
             var chatService = _services.GetRequiredService<IChatService>();
@@ -221,6 +248,7 @@ public class MainScreen : IScreen
             {
                 _sidebar.LoadConversations();
                 _chatPanel.SetConversation(conversation);
+                _chatPanel.CommandDispatcher!.CurrentConversation = conversation;
                 _focus = FocusTarget.Chat;
                 UpdateFocus();
                 Draw();
