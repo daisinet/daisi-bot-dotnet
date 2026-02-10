@@ -6,10 +6,10 @@ namespace DaisiBot.Agent.Tests.Models;
 public class UserSettingsTests
 {
     [Fact]
-    public void HostModeEnabled_DefaultsFalse()
+    public void HostModeEnabled_DefaultsTrue()
     {
         var settings = new UserSettings();
-        Assert.False(settings.HostModeEnabled);
+        Assert.True(settings.HostModeEnabled);
     }
 
     [Fact]

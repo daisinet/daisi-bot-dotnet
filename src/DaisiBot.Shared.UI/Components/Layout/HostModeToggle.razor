@@ -1,0 +1,50 @@
+@inject ISettingsService SettingsService
+@inject IDialogService DialogService
+@implements IDisposable
+
+<MudChip T="string"
+         Color="@(_hostMode ? Color.Warning : Color.Info)"
+         Size="Size.Small"
+         Icon="@(_hostMode ? Icons.Material.Filled.Computer : Icons.Material.Filled.Cloud)"
+         OnClick="ToggleMode"
+         Style="cursor: pointer;">
+    @(_hostMode ? "Self-Hosted" : "DaisiNet")
+</MudChip>
+
+@code {
+    private bool _hostMode;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings = await SettingsService.GetSettingsAsync();
+        _hostMode = settings.HostModeEnabled;
+    }
+
+    private async Task ToggleMode()
+    {
+        if (_hostMode)
+        {
+            var confirm = await DialogService.ShowMessageBox(
+                "Switch to DaisiNet?",
+                "Your credits will be spent and failures may occur or charges may apply, depending on your system setup.",
+                yesText: "Switch to DaisiNet", cancelText: "Cancel");
+            if (confirm != true) return;
+        }
+        else
+        {
+            var confirm = await DialogService.ShowMessageBox(
+                "Enable Self-Hosted Mode?",
+                "When your bots are idle, your system will process requests for others on the network.",
+                yesText: "Enable Self-Hosted", cancelText: "Cancel");
+            if (confirm != true) return;
+        }
+
+        _hostMode = !_hostMode;
+        var settings = await SettingsService.GetSettingsAsync();
+        settings.HostModeEnabled = _hostMode;
+        await SettingsService.SaveSettingsAsync(settings);
+        StateHasChanged();
+    }
+
+    public void Dispose() { }
+}

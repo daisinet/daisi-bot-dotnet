@@ -494,7 +494,8 @@ public class ChatPanel
                     Temperature = settings.Temperature,
                     TopP = settings.TopP,
                     MaxTokens = settings.MaxTokens,
-                    EnabledToolGroups = settings.GetEnabledToolGroups()
+                    EnabledToolGroups = settings.GetEnabledToolGroups(),
+                    UseHostMode = settings.HostModeEnabled
                 };
 
                 var streamBuf = new StringBuilder();

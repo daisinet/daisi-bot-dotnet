@@ -65,6 +65,16 @@ public class DaisiBotChatService : IChatService
         };
         await _conversationStore.AddMessageAsync(userMsg);
 
+        // Route to local inference if host mode is enabled
+        if (config.UseHostMode && _localInference?.IsAvailable == true)
+        {
+            await foreach (var chunk in SendLocalMessageAsync(conversationId, conversation, userMessage, config, _streamCts.Token))
+            {
+                yield return chunk;
+            }
+            yield break;
+        }
+
         // Delegate to agent loop if Agent think level
         if (config.ThinkLevel == ConversationThinkLevel.Agent)
         {
@@ -648,6 +658,173 @@ public class DaisiBotChatService : IChatService
         }
 
         yield return new StreamChunk(string.Empty, "Complete", true);
+    }
+
+    private async IAsyncEnumerable<StreamChunk> SendLocalMessageAsync(
+        Guid conversationId,
+        Conversation conversation,
+        string userMessage,
+        AgentConfig config,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        // Local models don't support the full agent pipeline; downgrade if needed
+        var thinkLevel = config.ThinkLevel == ConversationThinkLevel.Agent
+            ? ConversationThinkLevel.BasicWithTools
+            : config.ThinkLevel;
+
+        var createRequest = new CreateInferenceRequest
+        {
+            ModelName = config.ModelName,
+            InitializationPrompt = SkillPromptBuilder.BuildSystemPrompt(
+                config.InitializationPrompt, config.EnabledSkills),
+            ThinkLevel = EnumMapper.ToProto(thinkLevel)
+        };
+
+        foreach (var toolGroup in config.EnabledToolGroups)
+        {
+            createRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(toolGroup));
+        }
+
+        string? inferenceId = null;
+        string? createError = null;
+        try
+        {
+            var createResponse = await _localInference!.CreateSessionAsync(createRequest);
+            inferenceId = createResponse.InferenceId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create local inference session");
+            createError = ex.Message;
+        }
+
+        if (createError is not null)
+        {
+            yield return new StreamChunk($"Error creating local session: {createError}", "Error", true);
+            yield break;
+        }
+
+        var sendRequest = SendInferenceRequest.CreateDefault();
+        sendRequest.Text = FormatConversationHistory(conversation.Messages, userMessage);
+        sendRequest.Temperature = config.Temperature;
+        sendRequest.TopP = config.TopP;
+        sendRequest.MaxTokens = config.MaxTokens;
+        sendRequest.ThinkLevel = EnumMapper.ToProto(thinkLevel);
+
+        var fullContent = new StringBuilder();
+        var lastType = ChatMessageType.Text;
+        string? streamError = null;
+
+        await foreach (var chunk in StreamLocalChunksAsync(sendRequest, ct))
+        {
+            if (chunk.Type == "Error")
+            {
+                streamError = chunk.Content;
+                break;
+            }
+
+            if (Enum.TryParse<InferenceResponseTypes>(chunk.Type, out var responseType))
+            {
+                lastType = EnumMapper.FromResponseType(responseType);
+            }
+
+            if (chunk.Type is "Text" or "ToolContent")
+            {
+                fullContent.Append(chunk.Content);
+            }
+
+            yield return chunk;
+        }
+
+        // Close session (best effort)
+        if (inferenceId is not null)
+        {
+            try { await _localInference!.CloseSessionAsync(inferenceId); }
+            catch { /* best effort */ }
+        }
+
+        if (streamError is not null)
+        {
+            yield return new StreamChunk(streamError, "Error", true);
+            yield break;
+        }
+
+        // Persist assistant message
+        var cleanedContent = ContentCleaner.Clean(fullContent.ToString());
+        var assistantMsg = new ChatMessage
+        {
+            ConversationId = conversationId,
+            Role = ChatRole.Assistant,
+            Content = cleanedContent,
+            Type = lastType,
+            SortOrder = conversation.Messages.Count + 1
+        };
+
+        await _conversationStore.AddMessageAsync(assistantMsg);
+
+        // Auto-title on first message
+        if (conversation.Messages.Count <= 1 && conversation.Title == "New Conversation")
+        {
+            conversation.Title = userMessage.Length > 40
+                ? userMessage[..40] + "..."
+                : userMessage;
+            await _conversationStore.UpdateAsync(conversation);
+        }
+
+        yield return new StreamChunk(string.Empty, "Complete", true);
+    }
+
+    private async IAsyncEnumerable<StreamChunk> StreamLocalChunksAsync(
+        SendInferenceRequest sendRequest,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        IAsyncEnumerator<SendInferenceResponse>? enumerator = null;
+        string? initError = null;
+        try
+        {
+            enumerator = _localInference!.SendAsync(sendRequest, ct).GetAsyncEnumerator(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting local inference stream");
+            initError = ex.Message;
+        }
+
+        if (initError is not null)
+        {
+            yield return new StreamChunk($"Error: {initError}", "Error", true);
+            yield break;
+        }
+
+        var hasNext = true;
+        while (hasNext && !ct.IsCancellationRequested)
+        {
+            SendInferenceResponse? current = null;
+            string? iterError = null;
+            try
+            {
+                hasNext = await enumerator!.MoveNextAsync();
+                if (hasNext) current = enumerator.Current;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during local inference streaming");
+                iterError = ex.Message;
+            }
+
+            if (iterError is not null)
+            {
+                yield return new StreamChunk($"Error: {iterError}", "Error", true);
+                yield break;
+            }
+
+            if (hasNext && current is not null)
+            {
+                yield return new StreamChunk(current.Content, current.Type.ToString(), false);
+            }
+        }
+
+        await enumerator!.DisposeAsync();
     }
 
     private async Task SafeCloseAsync(bool closeOrcSession)

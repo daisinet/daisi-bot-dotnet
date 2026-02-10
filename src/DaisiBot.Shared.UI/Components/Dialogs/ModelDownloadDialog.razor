@@ -1,0 +1,92 @@
+@inject ILocalInferenceService LocalInference
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Downloading Models</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_models.Count == 0 && _error is null)
+        {
+            <MudText Typo="Typo.body1">Checking required models...</MudText>
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+        }
+        else if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-2">@_error</MudAlert>
+        }
+        else
+        {
+            <MudText Typo="Typo.body1" Class="mb-2">@_currentModelName (@(_currentIndex + 1) of @_models.Count)</MudText>
+            <MudProgressLinear Value="@_progress" Max="100" Color="Color.Primary" Class="mb-2" />
+            <MudText Typo="Typo.caption">@($"{_progress:F1}% complete")</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Skip">Skip</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private List<ModelDownloadInfo> _models = [];
+    private int _currentIndex;
+    private string _currentModelName = "";
+    private double _progress;
+    private string? _error;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ = StartDownloadAsync();
+        }
+    }
+
+    private async Task StartDownloadAsync()
+    {
+        try
+        {
+            var models = await LocalInference.GetRequiredDownloadsAsync();
+
+            if (models.Count == 0)
+            {
+                await LocalInference.InitializeAsync();
+                MudDialog.Close(DialogResult.Ok(true));
+                return;
+            }
+
+            _models = models;
+            _currentIndex = 0;
+            _currentModelName = models[0].Name;
+            await InvokeAsync(StateHasChanged);
+
+            for (var i = 0; i < models.Count; i++)
+            {
+                _currentIndex = i;
+                _currentModelName = models[i].Name;
+                _progress = 0;
+                await InvokeAsync(StateHasChanged);
+
+                await LocalInference.DownloadModelAsync(models[i], progress =>
+                {
+                    _progress = progress;
+                    InvokeAsync(StateHasChanged);
+                });
+            }
+
+            await LocalInference.InitializeAsync();
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void Skip()
+    {
+        MudDialog.Cancel();
+    }
+}

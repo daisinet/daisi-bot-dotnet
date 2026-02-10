@@ -106,7 +106,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         (string Name, string Sql)[] migrations =
         [
             ("EnabledSkillIdsCsv", "ALTER TABLE Settings ADD COLUMN EnabledSkillIdsCsv TEXT NOT NULL DEFAULT ''"),
-            ("HostModeEnabled", "ALTER TABLE Settings ADD COLUMN HostModeEnabled INTEGER NOT NULL DEFAULT 0"),
+            ("HostModeEnabled", "ALTER TABLE Settings ADD COLUMN HostModeEnabled INTEGER NOT NULL DEFAULT 1"),
             ("ModelFolderPath", "ALTER TABLE Settings ADD COLUMN ModelFolderPath TEXT NOT NULL DEFAULT ''"),
             ("LlamaRuntime", "ALTER TABLE Settings ADD COLUMN LlamaRuntime INTEGER NOT NULL DEFAULT 0"),
             ("ContextSize", "ALTER TABLE Settings ADD COLUMN ContextSize INTEGER NOT NULL DEFAULT 2048"),
@@ -121,6 +121,13 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             if (existingColumns.Contains(name)) continue;
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Data migration: default existing users to host mode
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE Settings SET HostModeEnabled = 1 WHERE HostModeEnabled = 0";
             await cmd.ExecuteNonQueryAsync();
         }
 

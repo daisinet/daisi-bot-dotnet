@@ -13,4 +13,5 @@ public class AgentConfig
     public int MaxTokens { get; set; } = 32000;
     public List<ToolGroupSelection> EnabledToolGroups { get; set; } = [];
     public List<Skill> EnabledSkills { get; set; } = [];
+    public bool UseHostMode { get; set; }
 }

@@ -13,12 +13,14 @@ public class BotMainScreen : IScreen
     private readonly IServiceProvider _services;
     private readonly IBotStore _botStore;
     private readonly IBotEngine _botEngine;
+    private readonly ISettingsService _settingsService;
     private readonly BotSidebarPanel _sidebar;
     private readonly BotOutputPanel _outputPanel;
     private readonly SlashCommandDispatcher _commandDispatcher;
 
     private BotInstance? _currentBot;
     private string _titleText = "Daisi Bot - Bots";
+    private bool _hostMode;
 
     private const int SidebarWidth = 24;
 
@@ -33,6 +35,7 @@ public class BotMainScreen : IScreen
         _services = app.Services;
         _botStore = _services.GetRequiredService<IBotStore>();
         _botEngine = _services.GetRequiredService<IBotEngine>();
+        _settingsService = _services.GetRequiredService<ISettingsService>();
 
         _sidebar = new BotSidebarPanel(app, _botStore);
         _outputPanel = new BotOutputPanel(app, _services);
@@ -55,6 +58,9 @@ public class BotMainScreen : IScreen
     {
         Task.Run(async () =>
         {
+            var settings = await _settingsService.GetSettingsAsync();
+            _hostMode = settings.HostModeEnabled;
+
             var authService = _services.GetRequiredService<IAuthService>();
             var authState = await authService.GetAuthStateAsync();
             _app.Post(() =>
@@ -157,7 +163,8 @@ public class BotMainScreen : IScreen
     {
         var w = _app.Width;
         var row = _app.Height - 1;
-        var bar = " F1:Bots  F2:Chats  F3:Model  F4:Settings  F5:Login  F6:Skills  F10:Quit ";
+        var modeLabel = _hostMode ? "F7:DaisiNet" : "F7:SelfHost";
+        var bar = $" F1:Bots  F2:Chats  F3:Model  F4:Settings  F5:Login  F6:Skills  {modeLabel}  F10:Quit ";
         AnsiConsole.SetReverse();
         var padded = bar.Length >= w ? bar[..w] : bar + new string(' ', w - bar.Length);
         AnsiConsole.WriteAt(row, 0, padded);
@@ -184,6 +191,9 @@ public class BotMainScreen : IScreen
                 return;
             case ConsoleKey.F6:
                 _app.RunModal(new SkillBrowserFlow(_app, _services));
+                return;
+            case ConsoleKey.F7:
+                ShowHostModeToggle();
                 return;
             case ConsoleKey.Tab:
                 ToggleFocus();
@@ -295,5 +305,32 @@ public class BotMainScreen : IScreen
                 AnsiConsole.Flush();
             }
         });
+    }
+
+    private void ShowHostModeToggle()
+    {
+        var message = _hostMode
+            ? "Switch to DaisiNet? Your credits will be spent and charges may apply depending on your setup."
+            : "Enable Self-Hosted mode? When your bots are idle, your system will process requests for others on the network.";
+
+        var confirmDialog = new ConfirmDialog(_app, message, confirmed =>
+        {
+            if (confirmed)
+            {
+                _hostMode = !_hostMode;
+                Task.Run(async () =>
+                {
+                    var settings = await _settingsService.GetSettingsAsync();
+                    settings.HostModeEnabled = _hostMode;
+                    await _settingsService.SaveSettingsAsync(settings);
+                    _app.Post(() =>
+                    {
+                        DrawStatusBar();
+                        AnsiConsole.Flush();
+                    });
+                });
+            }
+        });
+        _app.RunModal(confirmDialog);
     }
 }

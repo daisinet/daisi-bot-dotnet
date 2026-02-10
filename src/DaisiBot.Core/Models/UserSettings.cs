@@ -19,7 +19,7 @@ public class UserSettings
     public string EnabledSkillIdsCsv { get; set; } = string.Empty;
 
     // Host mode settings
-    public bool HostModeEnabled { get; set; }
+    public bool HostModeEnabled { get; set; } = true;
     public string ModelFolderPath { get; set; } = string.Empty;
     public int LlamaRuntime { get; set; }
     public uint ContextSize { get; set; } = 2048;

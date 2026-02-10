@@ -27,6 +27,17 @@
     <MudTabPanel Text="Tools">
         <ToolGroupSelector @bind-EnabledGroups="_enabledGroups" />
     </MudTabPanel>
+
+    <MudTabPanel Text="Host">
+        <MudSwitch @bind-Value="_settings.HostModeEnabled" Label="Enable Self-Hosted Mode" Color="Color.Primary" Class="mb-3" />
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            When self-hosted mode is enabled and your bots are idle, your system will process requests for others on the network.
+        </MudAlert>
+        <MudTextField @bind-Value="_settings.ModelFolderPath" Label="Model Folder Path" Class="mb-3" />
+        <MudNumericField T="uint" @bind-Value="_settings.ContextSize" Label="Context Size" Min="512" Max="32768" Class="mb-3" />
+        <MudNumericField T="int" @bind-Value="_settings.GpuLayerCount" Label="GPU Layers (-1 = all)" Min="-1" Max="100" Class="mb-3" />
+        <MudNumericField T="uint" @bind-Value="_settings.BatchSize" Label="Batch Size" Min="64" Max="4096" Class="mb-3" />
+    </MudTabPanel>
 </MudTabs>
 
 <div class="d-flex justify-end mt-4">

@@ -5,8 +5,10 @@ using DaisiBot.Agent.Auth;
 using DaisiBot.Agent.Extensions;
 using DaisiBot.Agent.Host;
 using DaisiBot.Core.Interfaces;
+using DaisiBot.Core.Models;
 using DaisiBot.Data;
 using DaisiBot.Tui;
+using DaisiBot.Tui.Dialogs;
 using DaisiBot.Tui.Screens;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,9 +69,21 @@ botScreen.ScreenRouter = router;
 
 // Restore last screen (default: bots)
 var lastScreen = "bots";
+UserSettings userSettings;
 {
     var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
-    var userSettings = await settingsSvc.GetSettingsAsync();
+    userSettings = await settingsSvc.GetSettingsAsync();
     lastScreen = userSettings.LastScreen;
 }
+
+// Schedule model download check for first frame if host mode enabled
+if (userSettings.HostModeEnabled)
+{
+    app.Post(() =>
+    {
+        var dialog = new ModelDownloadDialog(app, host.Services);
+        app.RunModal(dialog);
+    });
+}
+
 app.Run(router.GetScreen(lastScreen));

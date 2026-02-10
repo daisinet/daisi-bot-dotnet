@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Daisi.Host.Core.Services;
 using Daisi.Protos.V1;
 using DaisiBot.Core.Interfaces;
+using DaisiBot.Core.Models;
 using Microsoft.Extensions.Logging;
 
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
@@ -48,6 +49,87 @@ public class LocalInferenceService : ILocalInferenceService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to initialize local inference");
+        }
+    }
+
+    public async Task<List<ModelDownloadInfo>> GetRequiredDownloadsAsync()
+    {
+        try
+        {
+            await _settingsService.LoadAsync();
+
+            var settings = _settingsService.Settings;
+            var modelPath = settings.Model.ModelFolderPath;
+            if (modelPath.StartsWith("."))
+                modelPath = Path.Combine(_settingsService.GetRootFolder(), modelPath);
+
+            Directory.CreateDirectory(modelPath);
+            var existingFiles = new HashSet<string>(
+                Directory.GetFiles(modelPath).Select(Path.GetFileName)!,
+                StringComparer.OrdinalIgnoreCase);
+
+            var requiredModels = _modelService.ModelsClient.GetRequiredModels().Models;
+
+            var missing = new List<ModelDownloadInfo>();
+            foreach (var m in requiredModels)
+            {
+                if (!existingFiles.Contains(m.FileName))
+                {
+                    missing.Add(new ModelDownloadInfo
+                    {
+                        Name = m.Name,
+                        FileName = m.FileName,
+                        Url = m.Url,
+                        IsDefault = m.IsDefault,
+                        IsMultiModal = m.IsMultiModal
+                    });
+                }
+            }
+
+            return missing;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check required model downloads");
+            return [];
+        }
+    }
+
+    public async Task DownloadModelAsync(ModelDownloadInfo model, Action<double>? onProgress = null, CancellationToken ct = default)
+    {
+        var aiModel = new AIModel
+        {
+            Name = model.Name,
+            FileName = model.FileName,
+            Url = model.Url,
+            IsDefault = model.IsDefault,
+            IsMultiModal = model.IsMultiModal,
+            Enabled = true
+        };
+
+        await _modelService.DownloadRequiredModelAsync(aiModel, onProgress);
+
+        // Register the model in host settings if not already present
+        var settings = _settingsService.Settings;
+        if (!settings.Model.Models.Any(m => m.Name == model.Name))
+        {
+            if (model.IsDefault)
+            {
+                foreach (var existing in settings.Model.Models)
+                    existing.IsDefault = false;
+            }
+
+            settings.Model.Models.Add(new AIModel
+            {
+                Name = model.Name,
+                FileName = model.FileName,
+                Enabled = true,
+                IsDefault = model.IsDefault,
+                IsMultiModal = model.IsMultiModal,
+                Url = model.Url
+            });
+
+            await _settingsService.SaveAsync();
         }
     }
 

@@ -25,8 +25,8 @@ All projects target **.NET 10.0**.
 
 Shared domain layer with no external dependencies. Defines:
 
-- **Models**: `Conversation`, `ChatMessage`, `AgentConfig`, `AuthState`, `UserSettings`, `Skill`, `AvailableModel`, `ChatStats`, `BotInstance`, `BotLogEntry`, `SlashCommand`
-- **Interfaces**: `IAuthService`, `IChatService`, `IConversationStore`, `ISettingsService`, `IModelService`, `ISkillService`, `IBotEngine`, `IBotStore`
+- **Models**: `Conversation`, `ChatMessage`, `AgentConfig`, `AuthState`, `UserSettings`, `Skill`, `AvailableModel`, `ChatStats`, `BotInstance`, `BotLogEntry`, `SlashCommand`, `ModelDownloadInfo`
+- **Interfaces**: `IAuthService`, `IChatService`, `IConversationStore`, `ISettingsService`, `IModelService`, `ISkillService`, `IBotEngine`, `IBotStore`, `ILocalInferenceService`
 - **Enums**: `ConversationThinkLevel` (Basic → TreeOfThought), `ChatMessageType` (Text, Thinking, Tooling, Error, etc.), `ToolGroupSelection` (8 categories of agent tools), `ChatRole`, `SkillStatus`, `SkillVisibility`, `BotStatus` (Idle/Running/WaitingForInput/Completed/Failed/Stopped), `BotScheduleType` (Once/Continuous/Interval/Hourly/Daily), `BotLogLevel`
 - **Security**: `ToolPermissions` for elevated access control, `EmployeeCheck` for internal authorization
 
@@ -50,13 +50,20 @@ Service implementations that integrate with the DAISI SDK via gRPC:
 - `WaitForInputAsync` blocks execution with a `TaskCompletionSource` until user responds
 - Concurrent bot management via `ConcurrentDictionary<Guid, BotRuntime>` with per-bot cancellation tokens and output channels
 
+**Local Inference** (`LocalInferenceService.cs`):
+- `ILocalInferenceService` bridges the DAISI Host Core engine into the bot client
+- `GetRequiredDownloadsAsync()` queries ORC for required models, compares against local files, returns missing `ModelDownloadInfo` list
+- `DownloadModelAsync()` downloads a single model with `Action<double>` progress callback, registers it in host settings on completion
+- `InitializeAsync()` loads host settings, tools, and models for local inference
+- Both TUI and MAUI invoke these methods at startup to auto-download missing models before the user interacts
+
 DI registration is handled by `AddDaisiBotAgent()` extension method.
 
 ### DaisiBot.Data
 
 SQLite database layer using EF Core. Database location: `%LocalAppData%\DaisiBot\daisibot.db`.
 
-- **DaisiBotDbContext** — DbSets for Conversations, Messages, Settings, AuthStates, InstalledSkills, Bots, BotLogEntries. Conversations cascade-delete their messages. `ApplyMigrationsAsync()` handles schema drift with ALTER TABLE migrations for new columns.
+- **DaisiBotDbContext** — DbSets for Conversations, Messages, Settings, AuthStates, InstalledSkills, Bots, BotLogEntries. Conversations cascade-delete their messages. `ApplyMigrationsAsync()` handles schema drift with ALTER TABLE migrations for new columns and data migrations (e.g., defaulting existing users to `HostModeEnabled = true`).
 - **SqliteConversationStore** — CRUD for conversations and messages, ordered by last update.
 - **SqliteAuthStateStore** — Singleton upsert pattern (ID=1) for auth token persistence.
 - **SqliteSettingsService** — Singleton upsert for user preferences (includes `LastScreen` for UI state persistence).
@@ -70,9 +77,10 @@ Reusable Blazor components built with [MudBlazor](https://mudblazor.com) (Materi
 
 - **Chat**: `ChatPanel` (message display + streaming + input), `ChatMessageBubble`, `StreamingMessage`, `ChatStatsBar`, `ChatInput`, `ThinkingIndicator`
 - **Auth**: `AuthStatusBadge`, `LoginDialog`
-- **Layout**: `MainLayout` (app shell with sidebar), `NavSidebar` (conversation list + navigation)
+- **Layout**: `MainLayout` (app shell with sidebar, auto-downloads models on first render when host mode enabled), `NavSidebar` (conversation list + navigation), `HostModeToggle` (Self-Hosted / DaisiNet mode switch chip in app bar)
 - **Settings**: `SettingsDialog`, `ModelPicker`, `ThinkLevelSelector`, `ToolGroupSelector`
 - **Skills**: `SkillBrowser`, `SkillCard`, `SkillDetail`, `InstalledSkillsList`, `SkillSubmitForm`
+- **Dialogs**: `ModelDownloadDialog` (progress dialog for downloading required models at startup — shows model name, linear progress bar, percentage; auto-closes on completion, Skip button to dismiss)
 - **Services**: `ChatNavigationState` — singleton bridging sidebar selection and chat panel rendering
 
 ### DaisiBot.Tui
@@ -126,7 +134,13 @@ Row H-1:     Status bar (F1:Bots F2:Chats F3:Model F4:Settings F5:Login F6:Skill
 - `/runnow` — Runs the selected bot immediately without affecting its schedule
 - `/status` — Shows detailed status of the selected bot or all bots
 
-**Dialogs**: `LoginFlow`, `ModelPickerFlow`, `SettingsFlow`, `SkillBrowserFlow`, `BotCreationFlow`, `HelpModal`, `ConfirmDialog` — all modal, async operations run on thread pool and post results back via `App.Post()`
+**Dialogs**: `LoginFlow`, `ModelPickerFlow`, `SettingsFlow`, `SkillBrowserFlow`, `BotCreationFlow`, `ModelDownloadDialog`, `HelpModal`, `ConfirmDialog` — all modal, async operations run on thread pool and post results back via `App.Post()`
+
+**Model Download at Startup** (`ModelDownloadDialog.cs`):
+- Shown automatically on first frame when `HostModeEnabled` is true
+- Queries ORC for required models, checks for missing files on disk
+- Downloads each model with a text-based progress bar, percentage, and model name
+- Auto-closes on completion and initializes local inference; Esc to skip
 
 **Bot Creation Flow** (`BotCreationFlow.cs`):
 Multi-step wizard: Goal → Label → Persona → Schedule → (Interval minutes if applicable) → Start Mode (Run Immediately / Schedule First Run) → Create
@@ -141,6 +155,7 @@ Cross-platform native app using .NET MAUI Blazor Hybrid. Targets Windows (WinUI)
 - `ChatNavigationState` singleton coordinates conversation selection between sidebar and chat panel
 - Auto-creates conversations on first message
 - Auth redirect: unauthenticated users are sent to `/login`, logout navigates back
+- On first render (after auth), checks for missing models and shows `ModelDownloadDialog` with progress if downloads are needed
 
 ### DaisiBot.Web
 
@@ -162,6 +177,18 @@ Two-step OTP flow:
 1. User provides email or phone number → `SendAuthCodeAsync()` sends a verification code
 2. User enters code → `ValidateAuthCodeAsync()` returns a client key (token)
 3. Token is persisted in SQLite and injected into all DAISI SDK calls via `DaisiBotClientKeyProvider`
+
+### Host Mode (Local Inference)
+
+DaisiBot defaults to **Self-Hosted mode** (`HostModeEnabled = true`), running inference locally on the user's machine using downloaded GGUF models. Both the TUI and MAUI apps automatically download required models at startup:
+
+1. App queries ORC for the required model list
+2. Compares against files already present in the local model folder
+3. For any missing models, shows a progress dialog (TUI: text-based progress bar; MAUI: MudBlazor linear progress)
+4. After all downloads complete, initializes the local inference engine
+5. Users can skip the download or switch to DaisiNet (cloud) mode via the `HostModeToggle` chip
+
+When host mode is active and bots are idle, the user's system processes requests for others on the network.
 
 ### Streaming Chat
 
@@ -212,7 +239,7 @@ dotnet build DaisiBot.slnx
 dotnet run --project src/DaisiBot.Tui
 ```
 
-Press F4 to log in, then start chatting. Use F2 to pick a model, F3 for settings, F5 to browse skills, F10 to quit.
+On first launch, required models are downloaded automatically (a progress dialog is shown). Press F4 to log in, then start chatting. Use F2 to pick a model, F3 for settings, F5 to browse skills, F7 to toggle host mode, F10 to quit.
 
 ### Run the MAUI App
 
@@ -220,7 +247,7 @@ Press F4 to log in, then start chatting. Use F2 to pick a model, F3 for settings
 dotnet run --project src/DaisiBot.Maui -f net10.0-windows10.0.19041.0
 ```
 
-The login page appears on startup. After authentication, use the sidebar to manage conversations and navigate between Chat, Settings, and Skills pages.
+The login page appears on startup. After authentication, required models are downloaded automatically if not already present. Use the sidebar to manage conversations and navigate between Chat, Settings, and Skills pages.
 
 ### Run the Web App
 
