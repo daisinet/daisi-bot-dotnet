@@ -95,7 +95,7 @@ public class LocalInferenceService : ILocalInferenceService
         }
     }
 
-    public async Task DownloadModelAsync(ModelDownloadInfo model, Action<double>? onProgress = null, CancellationToken ct = default)
+    public async Task DownloadModelAsync(ModelDownloadInfo model, Action<double, long, long?>? onProgress = null, CancellationToken ct = default)
     {
         var aiModel = new AIModel
         {
@@ -107,7 +107,7 @@ public class LocalInferenceService : ILocalInferenceService
             Enabled = true
         };
 
-        await _modelService.DownloadRequiredModelAsync(aiModel, onProgress);
+        await _modelService.DownloadRequiredModelAsync(aiModel, onProgress, ct);
 
         // Register the model in host settings if not already present
         var settings = _settingsService.Settings;

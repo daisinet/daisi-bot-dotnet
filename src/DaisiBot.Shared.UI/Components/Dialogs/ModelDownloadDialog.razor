@@ -68,7 +68,7 @@
                 _progress = 0;
                 await InvokeAsync(StateHasChanged);
 
-                await LocalInference.DownloadModelAsync(models[i], progress =>
+                await LocalInference.DownloadModelAsync(models[i], (progress, _, _) =>
                 {
                     _progress = progress;
                     InvokeAsync(StateHasChanged);

@@ -6,9 +6,12 @@ namespace DaisiBot.Tui.Dialogs;
 
 /// <summary>
 /// Modal dialog that downloads required models at startup, showing progress.
+/// Starts with a confirmation prompt before downloading.
 /// </summary>
 public class ModelDownloadDialog : IModal
 {
+    private enum State { Checking, Confirming, Downloading, Done, Error, Cancelled }
+
     private readonly App _app;
     private readonly ILocalInferenceService _localInference;
     private DialogRunner.BoxBounds? _box;
@@ -17,10 +20,12 @@ public class ModelDownloadDialog : IModal
     private int _currentIndex;
     private string _currentModelName = "";
     private double _progress;
-    private string _progressText = "";
+    private long _bytesDownloaded;
+    private long? _totalBytes;
     private string? _error;
-    private bool _done;
+    private State _state = State.Checking;
     private bool _started;
+    private CancellationTokenSource? _cts;
 
     public ModelDownloadDialog(App app, IServiceProvider services)
     {
@@ -30,79 +35,143 @@ public class ModelDownloadDialog : IModal
 
     public void Draw()
     {
-        _box = DialogRunner.DrawCenteredBox(_app, "Downloading Models", 44, 10);
+        _box = DialogRunner.DrawCenteredBox(_app, "Downloading Models", 44, 12);
 
-        if (_models.Count == 0 && !_done && _error is null)
+        switch (_state)
         {
-            DialogRunner.DrawLabel(_box, 1, "Checking required models...");
-        }
-        else if (_error is not null)
-        {
-            DialogRunner.DrawLabel(_box, 1, "Download failed:");
-            var errDisplay = _error.Length > _box.InnerWidth ? _error[.._box.InnerWidth] : _error;
-            AnsiConsole.SetForeground(ConsoleColor.Red);
-            DialogRunner.DrawLabel(_box, 3, errDisplay);
-            AnsiConsole.ResetStyle();
-        }
-        else if (_done)
-        {
-            DialogRunner.DrawLabel(_box, 2, "Models ready!");
-        }
-        else
-        {
-            // Model name and index
-            var header = $"{_currentModelName} ({_currentIndex + 1} of {_models.Count})";
-            if (header.Length > _box.InnerWidth)
-                header = header[.._box.InnerWidth];
-            DialogRunner.DrawLabel(_box, 1, header);
+            case State.Checking:
+                DialogRunner.DrawLabel(_box, 1, "Checking required models...");
+                break;
 
-            // Progress bar
-            var barWidth = _box.InnerWidth;
-            var filledCount = (int)(_progress / 100.0 * barWidth);
-            if (filledCount > barWidth) filledCount = barWidth;
-            var bar = new string('\u2588', filledCount) + new string('\u2591', barWidth - filledCount);
-            DialogRunner.DrawLabel(_box, 3, bar);
+            case State.Confirming:
+                DrawConfirming();
+                break;
 
-            // Percentage
-            var pctText = $"{_progress:F1}%";
-            DialogRunner.DrawLabel(_box, 4, pctText.PadRight(_box.InnerWidth));
+            case State.Downloading:
+                DrawDownloading();
+                break;
 
-            // Size text
-            if (_progressText.Length > 0)
-                DialogRunner.DrawLabel(_box, 5, _progressText.PadRight(_box.InnerWidth));
+            case State.Done:
+                DialogRunner.DrawLabel(_box, 2, "Models ready!");
+                DialogRunner.DrawButtonHints(_box, " Esc:Close ");
+                break;
+
+            case State.Error:
+                DialogRunner.DrawLabel(_box, 1, "Download failed:");
+                var errDisplay = _error!.Length > _box.InnerWidth ? _error[.._box.InnerWidth] : _error;
+                AnsiConsole.SetForeground(ConsoleColor.Red);
+                DialogRunner.DrawLabel(_box, 3, errDisplay);
+                AnsiConsole.ResetStyle();
+                DialogRunner.DrawButtonHints(_box, " Esc:Close ");
+                break;
+
+            case State.Cancelled:
+                DialogRunner.DrawLabel(_box, 2, "Download cancelled.");
+                DialogRunner.DrawButtonHints(_box, " Esc:Close ");
+                break;
         }
 
-        // Hints
-        var hints = _done || _error is not null ? " Esc:Close " : " Esc:Skip ";
-        DialogRunner.DrawButtonHints(_box, hints);
-
-        // Start download on first draw
+        // Kick off the initial check on first draw
         if (!_started)
         {
             _started = true;
-            StartDownload();
+            CheckModels();
         }
+    }
+
+    private void DrawConfirming()
+    {
+        var line = $"{_models.Count} model(s) need to be downloaded:";
+        DialogRunner.DrawLabel(_box!, 1, line);
+
+        // List model names (up to what fits in the box)
+        var maxRows = _box!.InnerHeight - 4; // leave room for header + hint rows
+        for (var i = 0; i < _models.Count && i < maxRows; i++)
+        {
+            var name = _models[i].Name;
+            if (name.Length > _box.InnerWidth - 2)
+                name = name[..(_box.InnerWidth - 2)];
+            DialogRunner.DrawLabel(_box, 2 + i, $"  {name}");
+        }
+
+        if (_models.Count > maxRows)
+            DialogRunner.DrawLabel(_box, 2 + maxRows, $"  ...and {_models.Count - maxRows} more");
+
+        DialogRunner.DrawButtonHints(_box, " Enter:Download  Esc:Skip ");
+    }
+
+    private void DrawDownloading()
+    {
+        // Model name and index
+        var header = $"{_currentModelName} ({_currentIndex + 1} of {_models.Count})";
+        if (header.Length > _box!.InnerWidth)
+            header = header[.._box.InnerWidth];
+        DialogRunner.DrawLabel(_box, 1, header);
+
+        // Progress bar
+        var barWidth = _box.InnerWidth;
+        var filledCount = (int)(_progress / 100.0 * barWidth);
+        if (filledCount > barWidth) filledCount = barWidth;
+        var bar = new string('\u2588', filledCount) + new string('\u2591', barWidth - filledCount);
+        DialogRunner.DrawLabel(_box, 3, bar);
+
+        // Percentage + bytes
+        string pctLine;
+        if (_totalBytes.HasValue && _totalBytes.Value > 0)
+        {
+            var dlMb = _bytesDownloaded / (1024.0 * 1024.0);
+            var totalMb = _totalBytes.Value / (1024.0 * 1024.0);
+            pctLine = $"{_progress:F1}% \u2014 {dlMb:N0} MB / {totalMb:N0} MB";
+        }
+        else
+        {
+            var dlMb = _bytesDownloaded / (1024.0 * 1024.0);
+            pctLine = $"{dlMb:N0} MB downloaded";
+        }
+        DialogRunner.DrawLabel(_box, 5, pctLine.PadRight(_box.InnerWidth));
+
+        DialogRunner.DrawButtonHints(_box, " Esc:Cancel ");
     }
 
     public void HandleKey(ConsoleKeyInfo key)
     {
         if (key.Key == ConsoleKey.Escape)
         {
-            _app.CloseModal();
-
-            // If downloads completed successfully, initialize inference
-            if (_done)
+            switch (_state)
             {
-                Task.Run(async () =>
-                {
-                    try { await _localInference.InitializeAsync(); }
-                    catch { /* logged internally */ }
-                });
+                case State.Confirming:
+                    // User declined — close without downloading
+                    _app.CloseModal();
+                    break;
+
+                case State.Downloading:
+                    // Cancel in-flight download
+                    _cts?.Cancel();
+                    break;
+
+                case State.Done:
+                    _app.CloseModal();
+                    // Initialize inference after successful download
+                    Task.Run(async () =>
+                    {
+                        try { await _localInference.InitializeAsync(); }
+                        catch { /* logged internally */ }
+                    });
+                    break;
+
+                case State.Error:
+                case State.Cancelled:
+                    _app.CloseModal();
+                    break;
             }
+        }
+        else if (key.Key == ConsoleKey.Enter && _state == State.Confirming)
+        {
+            StartDownload();
         }
     }
 
-    private void StartDownload()
+    private void CheckModels()
     {
         Task.Run(async () =>
         {
@@ -114,47 +183,77 @@ public class ModelDownloadDialog : IModal
                 {
                     // All models present — just initialize and close
                     await _localInference.InitializeAsync();
-                    _app.Post(() =>
-                    {
-                        _app.CloseModal();
-                    });
+                    _app.Post(() => _app.CloseModal());
                     return;
                 }
 
                 _app.Post(() =>
                 {
                     _models = models;
-                    _currentIndex = 0;
-                    _currentModelName = models[0].Name;
+                    _state = State.Confirming;
                     Draw();
                     AnsiConsole.Flush();
                 });
+            }
+            catch (Exception ex)
+            {
+                _app.Post(() =>
+                {
+                    _error = ex.Message;
+                    _state = State.Error;
+                    Draw();
+                    AnsiConsole.Flush();
+                });
+            }
+        });
+    }
 
-                for (var i = 0; i < models.Count; i++)
+    private void StartDownload()
+    {
+        _state = State.Downloading;
+        _currentIndex = 0;
+        _currentModelName = _models[0].Name;
+        _progress = 0;
+        _bytesDownloaded = 0;
+        _totalBytes = null;
+        _cts = new CancellationTokenSource();
+
+        Draw();
+        AnsiConsole.Flush();
+
+        var ct = _cts.Token;
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                for (var i = 0; i < _models.Count; i++)
                 {
                     var idx = i;
-                    var model = models[idx];
+                    var model = _models[idx];
 
                     _app.Post(() =>
                     {
                         _currentIndex = idx;
                         _currentModelName = model.Name;
                         _progress = 0;
-                        _progressText = "";
+                        _bytesDownloaded = 0;
+                        _totalBytes = null;
                         Draw();
                         AnsiConsole.Flush();
                     });
 
-                    await _localInference.DownloadModelAsync(model, progress =>
+                    await _localInference.DownloadModelAsync(model, (pct, downloaded, total) =>
                     {
                         _app.Post(() =>
                         {
-                            _progress = progress;
-                            _progressText = $"{progress:F1}% complete";
+                            _progress = pct;
+                            _bytesDownloaded = downloaded;
+                            _totalBytes = total;
                             Draw();
                             AnsiConsole.Flush();
                         });
-                    });
+                    }, ct);
                 }
 
                 // All downloads complete — initialize
@@ -162,7 +261,7 @@ public class ModelDownloadDialog : IModal
 
                 _app.Post(() =>
                 {
-                    _done = true;
+                    _state = State.Done;
                     Draw();
                     AnsiConsole.Flush();
 
@@ -174,11 +273,21 @@ public class ModelDownloadDialog : IModal
                     });
                 });
             }
+            catch (OperationCanceledException)
+            {
+                _app.Post(() =>
+                {
+                    _state = State.Cancelled;
+                    Draw();
+                    AnsiConsole.Flush();
+                });
+            }
             catch (Exception ex)
             {
                 _app.Post(() =>
                 {
                     _error = ex.Message;
+                    _state = State.Error;
                     Draw();
                     AnsiConsole.Flush();
                 });
