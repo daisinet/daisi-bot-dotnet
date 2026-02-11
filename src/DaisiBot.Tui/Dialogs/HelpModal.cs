@@ -13,7 +13,7 @@ public class HelpModal : IModal
         "  /help              Show this help",
         "  /new               Create new bot or conversation",
         "  /kill [label]      Stop a running bot",
-        "  /list              List all bots with status",
+
         "  /status            Show detailed bot status",
         "  /runnow            Run selected bot immediately",
         "  /install <skill>   Search and install a skill",
@@ -21,6 +21,7 @@ public class HelpModal : IModal
         "  /model             Open model picker",
         "  /settings          Open settings",
         "  /login             Open login flow",
+        "  /balance           Check credit balance",
         "  /clear             Clear current output",
         "  /export [file]     Export log/chat to file",
         "",

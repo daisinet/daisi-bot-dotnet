@@ -129,6 +129,77 @@ html, body {
     font-size: 0.9em;
 }
 
+/* Learn / Courseware */
+.learn-section {
+    min-height: calc(100vh - 200px);
+}
+
+.learn-content h1 {
+    font-size: 2rem;
+}
+
+.learn-content .glass-card {
+    cursor: default;
+}
+
+.learn-content .glass-card:hover {
+    transform: none;
+}
+
+.learn-content a .glass-card:hover {
+    transform: translateY(-2px);
+}
+
+.learn-content .code pre {
+    background: #0d0d0d;
+    border: 1px solid var(--divider-color);
+    color: #e0e0e0;
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.9em;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.learn-content .table {
+    font-size: 0.92rem;
+}
+
+.learn-content .table th {
+    color: var(--accent-color);
+    border-color: var(--divider-color);
+}
+
+.learn-content .table td {
+    border-color: var(--divider-color);
+}
+
+.recall-checkpoint {
+    border-color: rgba(247, 140, 29, 0.4) !important;
+    background: rgba(247, 140, 29, 0.05);
+}
+
+.recall-question {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--divider-color);
+}
+
+.recall-question:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.recall-question details summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.recall-question details summary:hover {
+    color: white;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .hero h1 { font-size: 2.5rem; }

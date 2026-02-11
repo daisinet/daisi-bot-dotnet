@@ -4,6 +4,7 @@ using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models.Skills;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using SdkSkillFileLoader = Daisi.SDK.Skills.SkillFileLoader;
 
 namespace DaisiBot.Agent.Skills;
 
@@ -69,30 +70,24 @@ public class SkillFileLoader : ISkillFileLoader
 
     private static Skill LoadMarkdown(string content, string fileName, string category)
     {
-        var (frontmatter, body) = ParseFrontmatter(content);
+        // Delegate frontmatter parsing to the shared SDK parser
+        var sdkSkill = SdkSkillFileLoader.LoadMarkdown(content, BuildId(category, fileName));
 
         var skill = new Skill
         {
-            Id = BuildId(category, fileName),
-            SystemPromptTemplate = body.Trim(),
+            Id = sdkSkill.Id,
+            Name = string.IsNullOrWhiteSpace(sdkSkill.Name) ? fileName : sdkSkill.Name,
+            Description = sdkSkill.Description,
+            ShortDescription = sdkSkill.ShortDescription,
+            Version = sdkSkill.Version,
+            Author = sdkSkill.Author,
+            Tags = sdkSkill.Tags,
+            IconUrl = sdkSkill.IconUrl,
+            SystemPromptTemplate = sdkSkill.SystemPromptTemplate,
+            RequiredToolGroups = ParseToolGroups(sdkSkill.RequiredToolGroups),
             Visibility = SkillVisibility.Public,
             Status = SkillStatus.Approved
         };
-
-        if (frontmatter is not null)
-        {
-            skill.Name = frontmatter.Name;
-            skill.Description = frontmatter.Description;
-            skill.ShortDescription = frontmatter.ShortDescription;
-            skill.Version = frontmatter.Version;
-            skill.Author = frontmatter.Author;
-            skill.Tags = frontmatter.Tags;
-            skill.IconUrl = frontmatter.IconUrl;
-            skill.RequiredToolGroups = ParseToolGroups(frontmatter.Tools);
-        }
-
-        if (string.IsNullOrWhiteSpace(skill.Name))
-            skill.Name = fileName;
 
         return skill;
     }
@@ -188,30 +183,24 @@ public class SkillFileLoader : ISkillFileLoader
 
     internal static (SkillFrontmatter? Frontmatter, string Body) ParseFrontmatter(string content)
     {
-        if (!content.StartsWith("---"))
-            return (null, content);
+        // Delegate to the shared SDK parser, then map to bot's SkillFrontmatter type
+        var (sdkFrontmatter, body) = SdkSkillFileLoader.ParseFrontmatter(content);
+        if (sdkFrontmatter is null)
+            return (null, body);
 
-        var endIndex = content.IndexOf("---", 3, StringComparison.Ordinal);
-        if (endIndex < 0)
-            return (null, content);
-
-        var yamlBlock = content[3..endIndex].Trim();
-        var body = content[(endIndex + 3)..];
-
-        try
+        var frontmatter = new SkillFrontmatter
         {
-            var deserializer = new DeserializerBuilder()
-                .WithNamingConvention(CamelCaseNamingConvention.Instance)
-                .IgnoreUnmatchedProperties()
-                .Build();
-
-            var frontmatter = deserializer.Deserialize<SkillFrontmatter>(yamlBlock) ?? new SkillFrontmatter();
-            return (frontmatter, body);
-        }
-        catch
-        {
-            return (null, content);
-        }
+            Name = sdkFrontmatter.Name,
+            Description = sdkFrontmatter.Description,
+            ShortDescription = sdkFrontmatter.ShortDescription,
+            Version = sdkFrontmatter.Version,
+            Author = sdkFrontmatter.Author,
+            Tags = sdkFrontmatter.Tags,
+            Tools = sdkFrontmatter.Tools,
+            IconUrl = sdkFrontmatter.IconUrl,
+            IsRequired = sdkFrontmatter.IsRequired
+        };
+        return (frontmatter, body);
     }
 
     internal static string BuildId(string category, string fileName)

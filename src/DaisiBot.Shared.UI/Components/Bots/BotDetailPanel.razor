@@ -123,10 +123,9 @@ else
 
     <div class="d-flex gap-2">
         <MudTextField @bind-Value="_inputText" Label="Send input to bot" Variant="Variant.Outlined"
-                      Disabled="@(_bot.Status != BotStatus.WaitingForInput)"
-                      OnKeyDown="OnInputKeyDown" Immediate="true" />
+                      OnKeyDown="OnInputKeyDown" Immediate="true" Class="flex-grow-1" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   Disabled="@(_bot.Status != BotStatus.WaitingForInput || string.IsNullOrWhiteSpace(_inputText))"
+                   Disabled="@(string.IsNullOrWhiteSpace(_inputText))"
                    OnClick="SendInput">Send</MudButton>
     </div>
 }
@@ -258,7 +257,7 @@ else
 
     private async Task OnInputKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_inputText) && _bot?.Status == BotStatus.WaitingForInput)
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_inputText))
         {
             await SendInput();
         }

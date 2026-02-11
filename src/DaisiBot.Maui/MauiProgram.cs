@@ -48,6 +48,7 @@ public static class MauiProgram
         // Host mode services (local inference)
         builder.Services.AddSingleton<HostSettingsService, DesktopSettingsService>();
         builder.Services.AddSingleton<ModelService>();
+        builder.Services.AddSingleton<SkillSyncService>();
         builder.Services.AddSingleton<InferenceService>();
         builder.Services.AddSingleton<ToolService>();
         builder.Services.AddSingleton<ILocalInferenceService, LocalInferenceService>();

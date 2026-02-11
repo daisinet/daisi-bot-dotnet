@@ -15,6 +15,7 @@ public class LocalInferenceService : ILocalInferenceService
     private readonly InferenceService _inferenceService;
     private readonly ToolService _toolService;
     private readonly HostSettingsService _settingsService;
+    private readonly ISettingsService _userSettingsService;
     private readonly ILogger<LocalInferenceService> _logger;
     private bool _initialized;
 
@@ -25,12 +26,14 @@ public class LocalInferenceService : ILocalInferenceService
         InferenceService inferenceService,
         ToolService toolService,
         HostSettingsService settingsService,
+        ISettingsService userSettingsService,
         ILogger<LocalInferenceService> logger)
     {
         _modelService = modelService;
         _inferenceService = inferenceService;
         _toolService = toolService;
         _settingsService = settingsService;
+        _userSettingsService = userSettingsService;
         _logger = logger;
     }
 
@@ -41,6 +44,7 @@ public class LocalInferenceService : ILocalInferenceService
         try
         {
             await _settingsService.LoadAsync();
+            await SyncUserModelPathAsync();
             _toolService.LoadTools();
             _modelService.LoadModels();
             _initialized = true;
@@ -57,6 +61,7 @@ public class LocalInferenceService : ILocalInferenceService
         try
         {
             await _settingsService.LoadAsync();
+            await SyncUserModelPathAsync();
 
             var settings = _settingsService.Settings;
             var modelPath = settings.Model.ModelFolderPath;
@@ -130,6 +135,22 @@ public class LocalInferenceService : ILocalInferenceService
             });
 
             await _settingsService.SaveAsync();
+        }
+    }
+
+    private async Task SyncUserModelPathAsync()
+    {
+        try
+        {
+            var userSettings = await _userSettingsService.GetSettingsAsync();
+            if (!string.IsNullOrWhiteSpace(userSettings.ModelFolderPath))
+            {
+                _settingsService.Settings.Model.ModelFolderPath = userSettings.ModelFolderPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to sync user model folder path");
         }
     }
 

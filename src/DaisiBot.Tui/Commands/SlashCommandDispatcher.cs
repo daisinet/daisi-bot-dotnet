@@ -30,12 +30,12 @@ public class SlashCommandDispatcher
         _handlers["help"] = new HelpCommandHandler(app).HandleAsync;
         _handlers["new"] = new NewCommandHandler(app, services, context).HandleAsync;
         _handlers["kill"] = new KillCommandHandler(app, services, this).HandleAsync;
-        _handlers["list"] = new ListCommandHandler(services).HandleAsync;
         _handlers["install"] = new InstallCommandHandler(services).HandleAsync;
         _handlers["skills"] = new SkillsCommandHandler(app, services).HandleAsync;
         _handlers["model"] = new ModelCommandHandler(app, services).HandleAsync;
         _handlers["settings"] = new SettingsCommandHandler(app, services).HandleAsync;
         _handlers["login"] = new LoginCommandHandler(app, services).HandleAsync;
+        _handlers["balance"] = new BalanceCommandHandler(app, services).HandleAsync;
         _handlers["clear"] = new ClearCommandHandler().HandleAsync;
         _handlers["export"] = new ExportCommandHandler(services, context).HandleAsync;
         _handlers["status"] = new StatusCommandHandler(services, this).HandleAsync;

@@ -95,8 +95,9 @@ public class DaisiBotChatService : IChatService
         var createRequest = new CreateInferenceRequest
         {
             ModelName = config.ModelName,
-            InitializationPrompt = SkillPromptBuilder.BuildSystemPrompt(
-                config.InitializationPrompt, config.EnabledSkills),
+            InitializationPrompt = config.ThinkLevel == ConversationThinkLevel.Skilled
+                ? SkillPromptBuilder.BuildSystemPrompt(config.InitializationPrompt, config.EnabledSkills)
+                : config.InitializationPrompt,
             ThinkLevel = EnumMapper.ToProto(config.ThinkLevel)
         };
 
@@ -415,7 +416,7 @@ public class DaisiBotChatService : IChatService
             ModelName = config.ModelName,
             InitializationPrompt = SkillPromptBuilder.BuildSystemPrompt(
                 config.InitializationPrompt, config.EnabledSkills),
-            ThinkLevel = ThinkLevels.BasicWithTools
+            ThinkLevel = ThinkLevels.Skilled
         };
         foreach (var toolGroup in config.EnabledToolGroups)
         {
@@ -448,7 +449,7 @@ public class DaisiBotChatService : IChatService
             stepSendRequest.Temperature = config.Temperature;
             stepSendRequest.TopP = config.TopP;
             stepSendRequest.MaxTokens = config.MaxTokens;
-            stepSendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
+            stepSendRequest.ThinkLevel = ThinkLevels.Skilled;
 
             var stepStream = _inferenceClient!.Send(stepSendRequest);
             while (await stepStream.ResponseStream.MoveNext(ct))
@@ -548,13 +549,13 @@ public class DaisiBotChatService : IChatService
         AgentConfig config,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // Single BasicWithTools call as fallback
+        // Single Skilled call as fallback (includes skills)
         var createRequest = new CreateInferenceRequest
         {
             ModelName = config.ModelName,
             InitializationPrompt = SkillPromptBuilder.BuildSystemPrompt(
                 config.InitializationPrompt, config.EnabledSkills),
-            ThinkLevel = ThinkLevels.BasicWithTools
+            ThinkLevel = ThinkLevels.Skilled
         };
         foreach (var toolGroup in config.EnabledToolGroups)
         {
@@ -592,7 +593,7 @@ public class DaisiBotChatService : IChatService
         sendRequest.Temperature = config.Temperature;
         sendRequest.TopP = config.TopP;
         sendRequest.MaxTokens = config.MaxTokens;
-        sendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
+        sendRequest.ThinkLevel = ThinkLevels.Skilled;
 
         var fullContent = new StringBuilder();
         var lastType = ChatMessageType.Text;
@@ -669,7 +670,7 @@ public class DaisiBotChatService : IChatService
     {
         // Local models don't support the full agent pipeline; downgrade if needed
         var thinkLevel = config.ThinkLevel == ConversationThinkLevel.Agent
-            ? ConversationThinkLevel.BasicWithTools
+            ? ConversationThinkLevel.Skilled
             : config.ThinkLevel;
 
         var createRequest = new CreateInferenceRequest

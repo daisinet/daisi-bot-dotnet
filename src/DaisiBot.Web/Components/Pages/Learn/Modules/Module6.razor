@@ -1,0 +1,168 @@
+@page "/learn/bots"
+@layout DaisiBot.Web.Components.Pages.Learn.LearnLayout
+
+<h1 class="font-accent mb-4">Module 6 &middot; <span class="text-accent">Bots &amp; Automation</span></h1>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">What Is a Bot?</h4>
+    <p>
+        A <strong>Bot</strong> (BotInstance) is an autonomous agent that runs on a schedule
+        without your interaction. You give it a <em>goal</em> and a <em>persona</em>, and
+        DaisiBot's <strong>BotEngine</strong> executes a plan-execute-synthesize loop to
+        accomplish it.
+    </p>
+    <p class="mb-0">
+        Bots are the biggest differentiator from simple chat &mdash; they turn DaisiBot from
+        a conversational tool into a background automation engine.
+    </p>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Bot Anatomy</h4>
+    <table class="table table-dark table-bordered">
+        <thead>
+            <tr><th style="width:25%;">Field</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td class="text-accent">Label</td><td>Display name (e.g. "Daily News Summary")</td></tr>
+            <tr><td class="text-accent">Goal</td><td>What the bot should accomplish each run</td></tr>
+            <tr><td class="text-accent">Persona</td><td>System prompt that shapes the bot's behavior</td></tr>
+            <tr><td class="text-accent">Schedule</td><td>Once, Continuous, Interval, Hourly, or Daily</td></tr>
+            <tr><td class="text-accent">ModelName</td><td>Which model the bot uses</td></tr>
+            <tr><td class="text-accent">Temperature / MaxTokens</td><td>Inference parameters for this bot</td></tr>
+            <tr><td class="text-accent">EnabledSkillIdsCsv</td><td>Skills active during bot execution</td></tr>
+            <tr><td class="text-accent">Status</td><td>Current lifecycle state (see below)</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Bot Lifecycle</h4>
+    <p>A bot moves through these statuses:</p>
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <span class="badge bg-secondary px-3 py-2">Idle</span>
+        <span class="text-muted">&rarr;</span>
+        <span class="badge bg-primary px-3 py-2">Running</span>
+        <span class="text-muted">&rarr;</span>
+        <span class="badge bg-success px-3 py-2">Completed</span>
+    </div>
+    <table class="table table-dark table-bordered">
+        <thead>
+            <tr><th style="width:15%;">Icon</th><th style="width:20%;">Status</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+            <tr><td class="text-center fs-5">&#9675;</td><td>Idle</td><td>Waiting for the next scheduled run</td></tr>
+            <tr><td class="text-center fs-5 text-accent">&#9654;</td><td>Running</td><td>Actively executing its action plan</td></tr>
+            <tr><td class="text-center fs-5" style="color:#ff9800;">&#9888;</td><td>WaitingForInput</td><td>Encountered an error and needs your guidance (flashes in TUI)</td></tr>
+            <tr><td class="text-center fs-5 text-success">&#10003;</td><td>Completed</td><td>Finished the goal successfully</td></tr>
+            <tr><td class="text-center fs-5 text-danger">&#10007;</td><td>Failed</td><td>Exhausted retries</td></tr>
+            <tr><td class="text-center fs-5">&#9632;</td><td>Stopped</td><td>Manually terminated via <code>/kill</code></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">The Plan-Execute-Synthesize Loop</h4>
+    <p>When a bot runs, the BotEngine follows this cycle:</p>
+    <ol>
+        <li>
+            <strong>Plan</strong> &ndash; The AI generates an <code>ActionPlan</code> with 2&ndash;5 steps
+            based on the goal and persona. Each step has a description and a pending status.
+        </li>
+        <li>
+            <strong>Execute</strong> &ndash; Each step runs sequentially with tool access. The step
+            status updates in real time (Pending &rarr; Executing &rarr; Completed or Error).
+            Results are stored per-step.
+        </li>
+        <li>
+            <strong>Synthesize</strong> &ndash; After all steps complete, the engine logs a final
+            result summary. If any step errored, the bot may transition to WaitingForInput
+            and store <code>RetryGuidance</code> for the next attempt.
+        </li>
+    </ol>
+    <p class="mb-0">
+        The scheduler checks every <strong>30 seconds</strong> (first check 2 seconds after
+        startup) and triggers any bot whose <code>NextRunAt</code> has passed.
+    </p>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Creating a Bot (TUI Wizard)</h4>
+    <p>The TUI provides a step-by-step creation wizard:</p>
+    <ol>
+        <li><strong>Goal</strong> &ndash; What should the bot accomplish? (e.g. "Summarize today's top tech news")</li>
+        <li><strong>Label</strong> &ndash; A short name for the sidebar (e.g. "Tech News")</li>
+        <li><strong>Persona</strong> &ndash; System prompt shaping behavior (e.g. "You are a concise tech journalist")</li>
+        <li><strong>Schedule</strong> &ndash; Once, Continuous, Interval (custom minutes), Hourly, or Daily</li>
+        <li><strong>Start Mode</strong> &ndash; Run Immediately or Schedule First Run</li>
+    </ol>
+    <p class="mb-0">
+        In MAUI and Web, the same fields appear in a form dialog.
+    </p>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Monitoring &amp; Managing Bots</h4>
+    <ul>
+        <li><strong>Sidebar</strong> &ndash; In the TUI Bot screen (F2), each bot shows a status icon and label. Select one to see its output log.</li>
+        <li><strong>/status</strong> &ndash; Shows detailed info for the selected bot or a summary of all bots.</li>
+        <li><strong>/runnow</strong> &ndash; Triggers immediate execution without affecting the schedule.</li>
+        <li><strong>/kill</strong> &ndash; Shows a confirmation dialog, then stops and deletes the bot.</li>
+        <li><strong>Log output</strong> &ndash; Color-coded entries:
+            <span style="color:#e040fb;">bold magenta</span> for steps,
+            <span style="color:#00e5ff;">bold cyan</span> for results,
+            <span style="color:#ff5252;">bold red</span> for errors,
+            <span style="color:#ffd740;">yellow</span> for warnings.
+        </li>
+    </ul>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Error Recovery</h4>
+    <p class="mb-0">
+        When a bot step fails, the BotEngine transitions to <strong>WaitingForInput</strong>.
+        The TUI flashes the <span style="color:#ff9800;">&#9888;</span> icon to get your attention.
+        You can provide <em>retry guidance</em> &mdash; a text instruction that gets injected
+        into the next attempt so the bot can adjust its approach. The bot stores
+        <code>RetryGuidance</code>, <code>LastError</code>, and <code>ExecutionCount</code>
+        to learn from failures.
+    </p>
+</div>
+
+<div class="glass-card recall-checkpoint">
+    <h4 class="font-accent">Active Recall Checkpoint</h4>
+    <p>Cover the answers and test yourself before peeking.</p>
+
+    <div class="recall-question">
+        <p><strong>1.</strong> What are the three phases of the BotEngine execution loop?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Plan (generate action steps), Execute (run each step with tools), Synthesize (summarize results and handle errors).</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>2.</strong> How often does the bot scheduler check for due bots?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Every 30 seconds (with the first check at 2 seconds after startup).</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>3.</strong> What happens when a bot enters WaitingForInput status?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">The bot encountered an error and is waiting for you to provide retry guidance. In TUI the status icon flashes to get your attention.</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>4.</strong> Name the five schedule types for bots.</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Once, Continuous, Interval (custom minutes), Hourly, Daily.</p>
+        </details>
+    </div>
+</div>
+
+<div class="d-flex justify-content-between mt-4">
+    <a href="/learn/skills" class="btn btn-outline-light">&larr; Module 5</a>
+    <a href="/learn/security" class="btn btn-accent">Module 7: Security &rarr;</a>
+</div>

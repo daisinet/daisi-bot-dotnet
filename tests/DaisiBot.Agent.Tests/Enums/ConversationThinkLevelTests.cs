@@ -5,9 +5,9 @@ namespace DaisiBot.Agent.Tests.Enums;
 public class ConversationThinkLevelTests
 {
     [Fact]
-    public void Agent_HasValue4()
+    public void Agent_HasValue3()
     {
-        Assert.Equal(4, (int)ConversationThinkLevel.Agent);
+        Assert.Equal(3, (int)ConversationThinkLevel.Agent);
     }
 
     [Fact]
@@ -24,15 +24,14 @@ public class ConversationThinkLevelTests
     {
         Assert.True(Enum.IsDefined(ConversationThinkLevel.Basic));
         Assert.True(Enum.IsDefined(ConversationThinkLevel.BasicWithTools));
-        Assert.True(Enum.IsDefined(ConversationThinkLevel.ChainOfThought));
-        Assert.True(Enum.IsDefined(ConversationThinkLevel.TreeOfThought));
+        Assert.True(Enum.IsDefined(ConversationThinkLevel.Skilled));
         Assert.True(Enum.IsDefined(ConversationThinkLevel.Agent));
     }
 
     [Fact]
-    public void TotalCount_IsFive()
+    public void TotalCount_IsFour()
     {
-        Assert.Equal(5, Enum.GetValues<ConversationThinkLevel>().Length);
+        Assert.Equal(4, Enum.GetValues<ConversationThinkLevel>().Length);
     }
 }
 

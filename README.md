@@ -27,7 +27,7 @@ Shared domain layer with no external dependencies. Defines:
 
 - **Models**: `Conversation`, `ChatMessage`, `AgentConfig`, `AuthState`, `UserSettings`, `Skill`, `AvailableModel`, `ChatStats`, `BotInstance`, `BotLogEntry`, `SlashCommand`, `ModelDownloadInfo`
 - **Interfaces**: `IAuthService`, `IChatService`, `IConversationStore`, `ISettingsService`, `IModelService`, `ISkillService`, `IBotEngine`, `IBotStore`, `ILocalInferenceService`
-- **Enums**: `ConversationThinkLevel` (Basic → TreeOfThought), `ChatMessageType` (Text, Thinking, Tooling, Error, etc.), `ToolGroupSelection` (8 categories of agent tools), `ChatRole`, `SkillStatus`, `SkillVisibility`, `BotStatus` (Idle/Running/WaitingForInput/Completed/Failed/Stopped), `BotScheduleType` (Once/Continuous/Interval/Hourly/Daily), `BotLogLevel`
+- **Enums**: `ConversationThinkLevel` (Basic, BasicWithTools, Skilled, Agent), `ChatMessageType` (Text, Thinking, Tooling, Error, etc.), `ToolGroupSelection` (8 categories of agent tools), `ChatRole`, `SkillStatus`, `SkillVisibility`, `BotStatus` (Idle/Running/WaitingForInput/Completed/Failed/Stopped), `BotScheduleType` (Once/Continuous/Interval/Hourly/Daily), `BotLogLevel`
 - **Security**: `ToolPermissions` for elevated access control, `EmployeeCheck` for internal authorization
 
 ### DaisiBot.Agent
@@ -129,7 +129,7 @@ Row H-1:     Status bar (F1:Bots F2:Chats F3:Model F4:Settings F5:Login F6:Skill
 **Slash Command System**:
 - `SlashCommandPopup` — Inline autocomplete popup above the input line, showing top 5 matching commands as user types after `/`. Up/Down to navigate, Tab/Enter to complete. Commands without parameters auto-execute on selection.
 - `SlashCommandDispatcher` — Routes commands to handlers. Context-aware: `CurrentBot`/`CurrentConversation` set on selection change.
-- **Commands**: `/help`, `/new`, `/list`, `/status`, `/kill`, `/runnow`, `/clear`, `/model`, `/settings`, `/skills`, `/export`, `/install <skill>`, `/login`
+- **Commands**: `/help`, `/new`, `/status`, `/kill`, `/runnow`, `/clear`, `/model`, `/settings`, `/skills`, `/export`, `/install <skill>`, `/login`, `/balance`
 - `/kill` — Context-aware, shows confirmation dialog, stops and deletes the bot
 - `/runnow` — Runs the selected bot immediately without affecting its schedule
 - `/status` — Shows detailed status of the selected bot or all bots

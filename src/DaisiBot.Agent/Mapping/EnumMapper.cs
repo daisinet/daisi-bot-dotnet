@@ -9,9 +9,8 @@ public static class EnumMapper
     {
         ConversationThinkLevel.Basic => ThinkLevels.Basic,
         ConversationThinkLevel.BasicWithTools => ThinkLevels.BasicWithTools,
-        ConversationThinkLevel.ChainOfThought => ThinkLevels.ChainOfThought,
-        ConversationThinkLevel.TreeOfThought => ThinkLevels.TreeOfThought,
-        ConversationThinkLevel.Agent => ThinkLevels.BasicWithTools,
+        ConversationThinkLevel.Skilled => ThinkLevels.Skilled,
+        ConversationThinkLevel.Agent => ThinkLevels.Skilled,
         _ => ThinkLevels.Basic
     };
 
@@ -19,8 +18,7 @@ public static class EnumMapper
     {
         ThinkLevels.Basic => ConversationThinkLevel.Basic,
         ThinkLevels.BasicWithTools => ConversationThinkLevel.BasicWithTools,
-        ThinkLevels.ChainOfThought => ConversationThinkLevel.ChainOfThought,
-        ThinkLevels.TreeOfThought => ConversationThinkLevel.TreeOfThought,
+        ThinkLevels.Skilled => ConversationThinkLevel.Skilled,
         _ => ConversationThinkLevel.Basic
     };
 

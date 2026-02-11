@@ -4,7 +4,6 @@ public enum ConversationThinkLevel
 {
     Basic = 0,
     BasicWithTools = 1,
-    ChainOfThought = 2,
-    TreeOfThought = 3,
-    Agent = 4
+    Skilled = 2,
+    Agent = 3
 }

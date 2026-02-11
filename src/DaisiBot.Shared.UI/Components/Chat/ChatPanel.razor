@@ -4,7 +4,7 @@
 @inject ISettingsService SettingsService
 @implements IDisposable
 
-<div class="chat-panel d-flex flex-column" style="height: 100%;">
+<div class="chat-panel d-flex flex-column" style="flex: 1; min-height: 0;">
     <div class="chat-messages flex-grow-1 overflow-auto pa-3" @ref="_messageContainer">
         @if (_conversation is not null)
         {
@@ -23,6 +23,13 @@
 
             <StreamingMessage Content="@_streamContent" Type="@_streamType" />
         }
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3" ShowCloseIcon="true" CloseIconClicked="() => _errorMessage = string.Empty">
+                @_errorMessage
+            </MudAlert>
+        }
     </div>
 
     <ChatStatsBar Stats="_stats" />
@@ -36,6 +43,7 @@
     private Conversation? _conversation;
     private string _streamContent = string.Empty;
     private string _streamType = "Text";
+    private string _errorMessage = string.Empty;
     private bool _isStreaming;
     private ChatStats _stats = new();
     private ElementReference _messageContainer;
@@ -75,6 +83,7 @@
 
         _isStreaming = true;
         _streamContent = string.Empty;
+        _errorMessage = string.Empty;
         _currentPlanGoal = null;
         _currentPlanSteps = [];
         _cts = new CancellationTokenSource();
@@ -96,10 +105,12 @@
         {
             await foreach (var chunk in ChatService.SendMessageAsync(_conversation.Id, message, config, _cts.Token))
             {
-                if (chunk.IsComplete) break;
-
                 switch (chunk.Type)
                 {
+                    case "Error":
+                        _errorMessage = chunk.Content;
+                        break;
+
                     case "ActionPlan":
                         HandleActionPlan(chunk.Content);
                         break;
@@ -113,12 +124,16 @@
                         break;
 
                     default:
-                        _streamContent += chunk.Content;
-                        _streamType = chunk.Type;
+                        if (!chunk.IsComplete)
+                        {
+                            _streamContent += chunk.Content;
+                            _streamType = chunk.Type;
+                        }
                         break;
                 }
 
                 await InvokeAsync(StateHasChanged);
+                if (chunk.IsComplete) break;
             }
 
             _stats = await ChatService.GetCurrentStatsAsync();
@@ -126,7 +141,7 @@
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _streamContent += $"\n[Error: {ex.Message}]";
+            _errorMessage = ex.Message;
         }
 
         _isStreaming = false;

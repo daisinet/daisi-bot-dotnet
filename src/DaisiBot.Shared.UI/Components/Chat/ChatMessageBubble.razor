@@ -15,9 +15,33 @@
 
         @if (Message.Type == ChatMessageType.Thinking)
         {
-            <MudText Typo="Typo.body2" Style="font-style: italic; opacity: 0.7;">
-                @Message.Content
-            </MudText>
+            <MudExpansionPanels Elevation="0" Class="mt-1" Style="background: transparent;">
+                <MudExpansionPanel Style="background: transparent; color: inherit;">
+                    <TitleContent>
+                        <div class="d-flex align-center">
+                            <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Small" Class="mr-1" Style="opacity: 0.7;" />
+                            <MudText Typo="Typo.caption" Style="opacity: 0.7; font-style: italic;">Chain of thought</MudText>
+                        </div>
+                    </TitleContent>
+                    <ChildContent>
+                        <MudText Typo="Typo.body2" Style="font-style: italic; opacity: 0.7;">
+                            @Message.Content
+                        </MudText>
+                    </ChildContent>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
+        else if (Message.Type is ChatMessageType.Tooling or ChatMessageType.ToolContent)
+        {
+            <div class="d-flex align-center gap-2 tooling-banner">
+                <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Small" Color="Color.Info" />
+                <MudText Typo="Typo.caption" Color="Color.Info" Style="font-weight: 600;">
+                    @(Message.Type == ChatMessageType.Tooling ? "Tool call" : "Tool result")
+                </MudText>
+            </div>
+            <div class="tooling-content">
+                <MarkdownRenderer Content="@Message.Content" />
+            </div>
         }
         else
         {
@@ -38,25 +62,33 @@
 
     private bool IsUser => Message.Role == ChatRole.User;
 
+    private bool IsTooling => Message.Type is ChatMessageType.Tooling or ChatMessageType.ToolContent;
+
     private string PaperClass => IsUser
         ? "pa-3 mud-theme-primary"
         : Message.Type == ChatMessageType.Thinking
             ? "pa-3 mud-theme-dark"
-            : "pa-3";
+            : IsTooling
+                ? "pa-3 tooling-bubble"
+                : "pa-3";
 
-    private string RoleIcon => Message.Role switch
-    {
-        ChatRole.User => Icons.Material.Filled.Person,
-        ChatRole.Assistant => Icons.Material.Filled.SmartToy,
-        ChatRole.Tool => Icons.Material.Filled.Build,
-        _ => Icons.Material.Filled.Info
-    };
+    private string RoleIcon => IsTooling
+        ? Icons.Material.Filled.Build
+        : Message.Role switch
+        {
+            ChatRole.User => Icons.Material.Filled.Person,
+            ChatRole.Assistant => Icons.Material.Filled.SmartToy,
+            ChatRole.Tool => Icons.Material.Filled.Build,
+            _ => Icons.Material.Filled.Info
+        };
 
-    private string RoleLabel => Message.Role switch
-    {
-        ChatRole.User => "You",
-        ChatRole.Assistant => "Bot",
-        ChatRole.Tool => "Tool",
-        _ => Message.Role.ToString()
-    };
+    private string RoleLabel => IsTooling
+        ? "Tool"
+        : Message.Role switch
+        {
+            ChatRole.User => "You",
+            ChatRole.Assistant => "Bot",
+            ChatRole.Tool => "Tool",
+            _ => Message.Role.ToString()
+        };
 }

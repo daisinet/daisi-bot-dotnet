@@ -15,7 +15,10 @@
         }
         else
         {
-            <MarkdownRenderer Content="@Content" />
+            <div class="streaming-content">
+                <MarkdownRenderer Content="@Content" />
+                <span class="streaming-cursor"></span>
+            </div>
         }
 
         @if (Type == "Tooling")

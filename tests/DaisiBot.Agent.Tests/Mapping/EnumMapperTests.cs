@@ -11,17 +11,16 @@ public class EnumMapperTests
     [Theory]
     [InlineData(ConversationThinkLevel.Basic, ThinkLevels.Basic)]
     [InlineData(ConversationThinkLevel.BasicWithTools, ThinkLevels.BasicWithTools)]
-    [InlineData(ConversationThinkLevel.ChainOfThought, ThinkLevels.ChainOfThought)]
-    [InlineData(ConversationThinkLevel.TreeOfThought, ThinkLevels.TreeOfThought)]
+    [InlineData(ConversationThinkLevel.Skilled, ThinkLevels.Skilled)]
     public void ToProto_StandardLevels_MapsCorrectly(ConversationThinkLevel input, ThinkLevels expected)
     {
         Assert.Equal(expected, EnumMapper.ToProto(input));
     }
 
     [Fact]
-    public void ToProto_Agent_MapsToBasicWithTools()
+    public void ToProto_Agent_MapsToSkilled()
     {
-        Assert.Equal(ThinkLevels.BasicWithTools, EnumMapper.ToProto(ConversationThinkLevel.Agent));
+        Assert.Equal(ThinkLevels.Skilled, EnumMapper.ToProto(ConversationThinkLevel.Agent));
     }
 
     [Fact]
@@ -35,8 +34,7 @@ public class EnumMapperTests
     [Theory]
     [InlineData(ThinkLevels.Basic, ConversationThinkLevel.Basic)]
     [InlineData(ThinkLevels.BasicWithTools, ConversationThinkLevel.BasicWithTools)]
-    [InlineData(ThinkLevels.ChainOfThought, ConversationThinkLevel.ChainOfThought)]
-    [InlineData(ThinkLevels.TreeOfThought, ConversationThinkLevel.TreeOfThought)]
+    [InlineData(ThinkLevels.Skilled, ConversationThinkLevel.Skilled)]
     public void FromProto_StandardLevels_MapsCorrectly(ThinkLevels input, ConversationThinkLevel expected)
     {
         Assert.Equal(expected, EnumMapper.FromProto(input));
@@ -96,8 +94,7 @@ public class EnumMapperTests
     [Theory]
     [InlineData(ConversationThinkLevel.Basic)]
     [InlineData(ConversationThinkLevel.BasicWithTools)]
-    [InlineData(ConversationThinkLevel.ChainOfThought)]
-    [InlineData(ConversationThinkLevel.TreeOfThought)]
+    [InlineData(ConversationThinkLevel.Skilled)]
     public void ToProto_FromProto_Roundtrip(ConversationThinkLevel level)
     {
         var proto = EnumMapper.ToProto(level);
@@ -108,10 +105,10 @@ public class EnumMapperTests
     [Fact]
     public void ToProto_Agent_DoesNotRoundtrip()
     {
-        // Agent maps to BasicWithTools, which maps back to BasicWithTools (not Agent)
+        // Agent maps to Skilled, which maps back to Skilled (not Agent)
         var proto = EnumMapper.ToProto(ConversationThinkLevel.Agent);
         var back = EnumMapper.FromProto(proto);
-        Assert.Equal(ConversationThinkLevel.BasicWithTools, back);
+        Assert.Equal(ConversationThinkLevel.Skilled, back);
         Assert.NotEqual(ConversationThinkLevel.Agent, back);
     }
 }

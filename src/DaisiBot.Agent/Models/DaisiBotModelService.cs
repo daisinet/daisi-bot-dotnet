@@ -22,9 +22,7 @@ public class DaisiBotModelService(ModelClientFactory modelClientFactory) : IMode
             SupportedThinkLevels = [
                 ConversationThinkLevel.Basic,
                 ConversationThinkLevel.BasicWithTools,
-                .. m.HasReasoning
-                    ? [ConversationThinkLevel.ChainOfThought, ConversationThinkLevel.TreeOfThought]
-                    : Array.Empty<ConversationThinkLevel>()
+                ConversationThinkLevel.Skilled
             ]
         }).ToList();
     }

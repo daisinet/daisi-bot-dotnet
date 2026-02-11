@@ -27,4 +27,7 @@ public class SkillFrontmatter
 
     [YamlMember(Alias = "iconUrl")]
     public string IconUrl { get; set; } = string.Empty;
+
+    [YamlMember(Alias = "isRequired")]
+    public bool IsRequired { get; set; } = false;
 }
