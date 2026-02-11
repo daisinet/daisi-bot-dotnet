@@ -1,0 +1,124 @@
+@inject IBotStore BotStore
+@inject IBotEngine BotEngine
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Bot</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_label" Label="Label" Required="true" RequiredError="Label is required"
+                      Class="mb-3" Variant="Variant.Outlined" />
+
+        <MudTextField @bind-Value="_goal" Label="Goal" Required="true" RequiredError="Goal is required"
+                      Class="mb-3" Lines="3" Variant="Variant.Outlined" />
+
+        <MudTextField @bind-Value="_persona" Label="Persona (optional)"
+                      Placeholder="e.g. You are a helpful assistant that..."
+                      Class="mb-3" Variant="Variant.Outlined" />
+
+        <MudSelect @bind-Value="_scheduleType" Label="Schedule" Class="mb-3" Variant="Variant.Outlined">
+            @foreach (BotScheduleType st in Enum.GetValues<BotScheduleType>())
+            {
+                <MudSelectItem Value="st">@st</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_scheduleType == BotScheduleType.Interval)
+        {
+            <MudNumericField @bind-Value="_intervalMinutes" Label="Interval (minutes)"
+                             Min="1" Class="mb-3" Variant="Variant.Outlined" />
+        }
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Steps (optional, overrides AI planning)</MudText>
+        @for (var i = 0; i < _steps.Count; i++)
+        {
+            var index = i;
+            <div class="d-flex align-center gap-2 mb-2">
+                <MudText Typo="Typo.body2" Class="flex-shrink-0">@(index + 1).</MudText>
+                <MudTextField @bind-Value="_steps[index]" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                               OnClick="() => RemoveStep(index)" />
+            </div>
+        }
+        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddStep" Class="mb-3">Add Step</MudButton>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_goal) || string.IsNullOrWhiteSpace(_label))">Save & Restart</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public BotInstance Bot { get; set; } = default!;
+
+    private string _label = string.Empty;
+    private string _goal = string.Empty;
+    private string? _persona;
+    private BotScheduleType _scheduleType = BotScheduleType.Once;
+    private int _intervalMinutes = 60;
+    private List<string> _steps = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _label = Bot.Label;
+        _goal = Bot.Goal;
+        _persona = Bot.Persona;
+        _scheduleType = Bot.ScheduleType;
+        _intervalMinutes = Bot.ScheduleIntervalMinutes > 0 ? Bot.ScheduleIntervalMinutes : 60;
+
+        var steps = await BotStore.GetStepsAsync(Bot.Id);
+        _steps = steps.Select(s => s.Description).ToList();
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void AddStep() => _steps.Add(string.Empty);
+
+    private void RemoveStep(int index)
+    {
+        if (index >= 0 && index < _steps.Count)
+            _steps.RemoveAt(index);
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_goal) || string.IsNullOrWhiteSpace(_label)) return;
+
+        var wasRunning = BotEngine.IsRunning(Bot.Id);
+        if (wasRunning)
+            await BotEngine.StopBotAsync(Bot.Id);
+
+        Bot.Label = _label;
+        Bot.Goal = _goal;
+        Bot.Persona = string.IsNullOrWhiteSpace(_persona) ? null : _persona;
+        Bot.ScheduleType = _scheduleType;
+        Bot.ScheduleIntervalMinutes = _scheduleType == BotScheduleType.Interval ? _intervalMinutes : 0;
+
+        await BotStore.UpdateAsync(Bot);
+
+        // Save steps
+        var botSteps = new List<BotStep>();
+        for (var i = 0; i < _steps.Count; i++)
+        {
+            var desc = _steps[i]?.Trim();
+            if (!string.IsNullOrWhiteSpace(desc))
+            {
+                botSteps.Add(new BotStep
+                {
+                    BotId = Bot.Id,
+                    StepNumber = i + 1,
+                    Description = desc
+                });
+            }
+        }
+        await BotStore.SetStepsAsync(Bot.Id, botSteps);
+
+        if (wasRunning)
+            await BotEngine.StartBotAsync(Bot.Id);
+
+        MudDialog.Close(DialogResult.Ok(Bot));
+    }
+}

@@ -114,11 +114,18 @@ public class ConfirmDialog : IModal
 
     public void Draw()
     {
-        _box = DialogRunner.DrawCenteredBox(_app, "Confirm", 40, 8);
-        DialogRunner.DrawLabel(_box, 1, _message);
+        // Word-wrap the message to determine box height
+        const int boxWidth = 50;
+        const int innerWidth = boxWidth - 4;
+        var lines = WordWrap(_message, innerWidth);
+        var boxHeight = lines.Count + 5; // 1 top border + lines + 1 blank + 1 buttons + 1 blank + 1 bottom border
+        _box = DialogRunner.DrawCenteredBox(_app, "Confirm", boxWidth, boxHeight);
+
+        for (var i = 0; i < lines.Count; i++)
+            DialogRunner.DrawLabel(_box, 1 + i, lines[i]);
 
         // Buttons
-        var btnRow = _box.InnerTop + 3;
+        var btnRow = _box.InnerTop + lines.Count + 1;
         var btnLeft = _box.InnerLeft + 4;
 
         if (_selectedYes)
@@ -165,5 +172,34 @@ public class ConfirmDialog : IModal
                 _callback(false);
                 break;
         }
+    }
+
+    private static List<string> WordWrap(string text, int maxWidth)
+    {
+        var lines = new List<string>();
+        var words = text.Split(' ');
+        var current = "";
+
+        foreach (var word in words)
+        {
+            if (current.Length == 0)
+            {
+                current = word;
+            }
+            else if (current.Length + 1 + word.Length <= maxWidth)
+            {
+                current += " " + word;
+            }
+            else
+            {
+                lines.Add(current);
+                current = word;
+            }
+        }
+
+        if (current.Length > 0)
+            lines.Add(current);
+
+        return lines;
     }
 }

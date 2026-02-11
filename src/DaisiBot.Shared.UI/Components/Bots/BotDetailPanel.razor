@@ -44,6 +44,10 @@ else
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartBot">Run Again</MudButton>
             }
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Edit" OnClick="EditBot">Edit</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.List" OnClick="ToggleSteps">@(_statusPanelVisible ? "Hide Steps" : "Show Steps")</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteBot">Delete</MudButton>
         </MudToolBar>
@@ -59,6 +63,20 @@ else
         <MudAlert Severity="Severity.Warning" Class="mb-4">@_bot.PendingQuestion</MudAlert>
     }
 
+    @if (_statusPanelVisible && _currentPlan is not null)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="1">
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Execution Steps</MudText>
+            @foreach (var step in _currentPlan.Steps)
+            {
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudIcon Icon="@GetStepIcon(step.Status)" Color="@GetStepColor(step.Status)" Size="Size.Small" />
+                    <MudText Typo="Typo.body2" Style="@GetStepStyle(step.Status)">@step.Description</MudText>
+                </div>
+            }
+        </MudPaper>
+    }
+
     <MudPaper Class="pa-4 mb-4" Elevation="1" Style="max-height: 500px; overflow-y: auto;">
         <MudText Typo="Typo.subtitle2" Class="mb-2">Log</MudText>
         @if (_logEntries.Count == 0)
@@ -69,17 +87,36 @@ else
         {
             @foreach (var entry in _logEntries)
             {
-                <div class="d-flex align-start gap-2 mb-1">
-                    <MudIcon Icon="@GetLogIcon(entry.Level)" Color="@GetLogColor(entry.Level)" Size="Size.Small" />
-                    <div>
-                        <MudText Typo="Typo.body2">@entry.Message</MudText>
-                        @if (!string.IsNullOrEmpty(entry.Detail))
-                        {
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Detail</MudText>
-                        }
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudText>
+                @if (entry.Level == BotLogLevel.StepComplete)
+                {
+                    <MudPaper Class="pa-2 mb-2" Outlined="true" Style="border-color: var(--mud-palette-info); border-width: 2px;">
+                        <div class="d-flex align-start gap-2">
+                            <MudIcon Icon="@GetLogIcon(entry.Level)" Color="@GetLogColor(entry.Level)" Size="Size.Small" />
+                            <div>
+                                <MudText Typo="Typo.body2">@entry.Message</MudText>
+                                @if (!string.IsNullOrEmpty(entry.Detail))
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Detail</MudText>
+                                }
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudText>
+                            </div>
+                        </div>
+                    </MudPaper>
+                }
+                else
+                {
+                    <div class="d-flex align-start gap-2 mb-1">
+                        <MudIcon Icon="@GetLogIcon(entry.Level)" Color="@GetLogColor(entry.Level)" Size="Size.Small" />
+                        <div>
+                            <MudText Typo="Typo.body2">@entry.Message</MudText>
+                            @if (!string.IsNullOrEmpty(entry.Detail))
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Detail</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@entry.Timestamp.ToLocalTime().ToString("HH:mm:ss")</MudText>
+                        </div>
                     </div>
-                </div>
+                }
             }
         }
     </MudPaper>
@@ -101,15 +138,19 @@ else
     private BotInstance? _bot;
     private List<BotLogEntry> _logEntries = [];
     private string _inputText = string.Empty;
+    private ActionPlan? _currentPlan;
+    private bool _statusPanelVisible;
 
     protected override async Task OnInitializedAsync()
     {
         BotEngine.BotStatusChanged += OnBotStatusChanged;
+        BotEngine.ActionPlanChanged += OnActionPlanChanged;
         await LoadBotAsync();
     }
 
     protected override async Task OnParametersSetAsync()
     {
+        _currentPlan = null;
         await LoadBotAsync();
     }
 
@@ -145,6 +186,25 @@ else
         }
     }
 
+    private void OnActionPlanChanged(object? sender, ActionPlanChangedEventArgs e)
+    {
+        if (e.BotId == BotId)
+        {
+            InvokeAsync(() =>
+            {
+                _currentPlan = e.Plan;
+                if (!_statusPanelVisible)
+                    _statusPanelVisible = true;
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void ToggleSteps()
+    {
+        _statusPanelVisible = !_statusPanelVisible;
+    }
+
     private async Task StartBot()
     {
         if (_bot is null) return;
@@ -155,6 +215,22 @@ else
     {
         if (_bot is null) return;
         await BotEngine.StopBotAsync(_bot.Id);
+    }
+
+    private async Task EditBot()
+    {
+        if (_bot is null) return;
+        var parameters = new DialogParameters<BotEditDialog>
+        {
+            { x => x.Bot, _bot }
+        };
+        var dialog = await DialogService.ShowAsync<BotEditDialog>("Edit Bot", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadBotAsync();
+            StateHasChanged();
+        }
     }
 
     private async Task DeleteBot()
@@ -225,8 +301,38 @@ else
         _ => Color.Default
     };
 
+    private static string GetStepIcon(ActionItemStatus status) => status switch
+    {
+        ActionItemStatus.Pending => Icons.Material.Filled.CheckBoxOutlineBlank,
+        ActionItemStatus.Running => Icons.Material.Filled.PlayCircle,
+        ActionItemStatus.Complete => Icons.Material.Filled.CheckBox,
+        ActionItemStatus.Failed => Icons.Material.Filled.Cancel,
+        ActionItemStatus.Skipped => Icons.Material.Filled.IndeterminateCheckBox,
+        _ => Icons.Material.Filled.CheckBoxOutlineBlank
+    };
+
+    private static Color GetStepColor(ActionItemStatus status) => status switch
+    {
+        ActionItemStatus.Pending => Color.Default,
+        ActionItemStatus.Running => Color.Warning,
+        ActionItemStatus.Complete => Color.Success,
+        ActionItemStatus.Failed => Color.Error,
+        ActionItemStatus.Skipped => Color.Default,
+        _ => Color.Default
+    };
+
+    private static string GetStepStyle(ActionItemStatus status) => status switch
+    {
+        ActionItemStatus.Pending => "opacity: 0.6;",
+        ActionItemStatus.Running => "font-weight: bold;",
+        ActionItemStatus.Failed => "text-decoration: line-through; opacity: 0.6;",
+        ActionItemStatus.Skipped => "opacity: 0.4;",
+        _ => ""
+    };
+
     public void Dispose()
     {
         BotEngine.BotStatusChanged -= OnBotStatusChanged;
+        BotEngine.ActionPlanChanged -= OnActionPlanChanged;
     }
 }

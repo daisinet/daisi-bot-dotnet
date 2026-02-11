@@ -13,4 +13,6 @@ public interface IBotStore
     Task AddLogEntryAsync(BotLogEntry entry);
     Task<List<BotLogEntry>> GetLogEntriesAsync(Guid botId, int limit = 200);
     Task ClearLogAsync(Guid botId);
+    Task<List<BotStep>> GetStepsAsync(Guid botId);
+    Task SetStepsAsync(Guid botId, List<BotStep> steps);
 }

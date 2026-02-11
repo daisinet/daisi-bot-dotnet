@@ -23,6 +23,9 @@ public class BotSidebarPanel
     public int Height { get; set; }
     public bool HasFocus { get; set; }
 
+    /// <summary>Set by the owning screen so the panel can skip draws when not visible.</summary>
+    public Func<bool>? IsScreenActive { get; set; }
+
     public event Action<BotInstance>? BotSelected;
     public event Action? NewBotRequested;
     public event Action? DeleteBotRequested;
@@ -43,6 +46,7 @@ public class BotSidebarPanel
     {
         if (_flashingBots.Count == 0) return;
         _flashOn = !_flashOn;
+        if (IsScreenActive?.Invoke() != true) return;
         _app.Post(() =>
         {
             Draw();
@@ -58,7 +62,7 @@ public class BotSidebarPanel
             _flashingBots.Remove(bot.Id);
     }
 
-    public void LoadBots(Action? onLoaded = null)
+    public void LoadBots(Action? onLoaded = null, bool skipDraw = false)
     {
         Task.Run(async () =>
         {
@@ -76,8 +80,11 @@ public class BotSidebarPanel
                         _flashingBots.Add(b.Id);
                 }
 
-                Draw();
-                AnsiConsole.Flush();
+                if (!skipDraw)
+                {
+                    Draw();
+                    AnsiConsole.Flush();
+                }
                 onLoaded?.Invoke();
             });
         });

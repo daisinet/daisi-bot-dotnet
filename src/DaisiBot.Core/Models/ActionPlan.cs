@@ -16,3 +16,9 @@ public class ActionItem
     public string? Result { get; set; }
     public string? Error { get; set; }
 }
+
+public class ActionPlanChangedEventArgs : EventArgs
+{
+    public Guid BotId { get; set; }
+    public ActionPlan Plan { get; set; } = new();
+}

@@ -33,6 +33,7 @@ public class ChatPanel
 
     // Stats
     private string _statsText = "";
+    private int _lastWrapWidth;
 
     public int Top { get; set; }
     public int Left { get; set; }
@@ -59,6 +60,7 @@ public class ChatPanel
     {
         _conversation = conversation;
         RebuildDisplayLines();
+        _lastWrapWidth = Width;
         _scrollOffset = Math.Max(0, _displayLines.Count - MessageAreaHeight);
         Draw();
     }
@@ -74,6 +76,15 @@ public class ChatPanel
 
     public void Draw()
     {
+        // Re-wrap if width changed
+        if (Width != _lastWrapWidth && _conversation is not null)
+        {
+            var atEnd = _scrollOffset >= Math.Max(0, _displayLines.Count - MessageAreaHeight);
+            RebuildDisplayLines();
+            _lastWrapWidth = Width;
+            if (atEnd) ScrollToEnd();
+        }
+
         var contentWidth = Width - 2;
 
         // Title bar

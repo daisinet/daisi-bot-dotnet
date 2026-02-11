@@ -28,6 +28,7 @@ public class BotEngine : IBotEngine, IDisposable
     private readonly Timer _schedulerTimer;
 
     public event EventHandler<BotInstance>? BotStatusChanged;
+    public event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
 
     public BotEngine(
         IBotStore botStore,
@@ -68,7 +69,7 @@ public class BotEngine : IBotEngine, IDisposable
 
         BotStatusChanged?.Invoke(this, bot);
 
-        runtime.ExecutionTask = Task.Run(() => ExecuteBotAsync(botId, runtime, cts.Token));
+        runtime.ExecutionTask = Task.Run(() => ExecuteBotLoopAsync(botId, runtime, cts.Token));
     }
 
     public async Task StopBotAsync(Guid botId)
@@ -91,9 +92,6 @@ public class BotEngine : IBotEngine, IDisposable
 
     public async Task SendInputAsync(Guid botId, string userInput)
     {
-        if (!_runtimes.TryGetValue(botId, out var runtime) || runtime.InputTcs is null)
-            return;
-
         var bot = await _botStore.GetAsync(botId);
         if (bot is not null)
         {
@@ -106,95 +104,60 @@ public class BotEngine : IBotEngine, IDisposable
             });
         }
 
-        runtime.InputTcs.TrySetResult(userInput);
+        if (_runtimes.TryGetValue(botId, out var runtime))
+            runtime.UserMessages.Enqueue(userInput);
     }
 
     public bool IsRunning(Guid botId) => _runtimes.ContainsKey(botId);
 
-    private async Task ExecuteBotAsync(Guid botId, BotRuntime runtime, CancellationToken ct)
+    /// <summary>
+    /// Long-running loop that keeps the runtime alive across execution cycles.
+    /// User messages can be queued at any time and are drained at the start of each cycle.
+    /// </summary>
+    private async Task ExecuteBotLoopAsync(Guid botId, BotRuntime runtime, CancellationToken ct)
     {
         try
         {
-            var bot = await _botStore.GetAsync(botId);
-            if (bot is null) return;
-
-            bot.ExecutionCount++;
-            bot.LastRunAt = DateTime.UtcNow;
-            await _botStore.UpdateAsync(bot);
-
-            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Starting bot: {bot.Label}");
-            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Goal: {bot.Goal}");
-
-            if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
-                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning,
-                    "Retrying with guidance", bot.RetryGuidance);
-
-            // Step 1: Skill assessment
-            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Assessing required skills...");
-            var settings = await _settingsService.GetSettingsAsync();
-
-            // Step 2: Plan
-            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Creating execution plan...");
-
-            var inferenceClient = CreateInferenceClient();
-            try
+            while (!ct.IsCancellationRequested)
             {
-                var plan = await CreatePlanAsync(inferenceClient, bot, settings, ct);
-                if (plan is null)
+                var bot = await _botStore.GetAsync(botId);
+                if (bot is null) break;
+
+                // Sleep until the next scheduled run
+                if (bot.NextRunAt.HasValue && bot.NextRunAt.Value > DateTime.UtcNow)
                 {
-                    await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning, "Could not create plan, executing goal directly");
-                    await ExecuteDirectAsync(inferenceClient, bot, settings, runtime, ct);
+                    var delay = bot.NextRunAt.Value - DateTime.UtcNow;
+                    if (delay > TimeSpan.Zero)
+                    {
+                        BotStatusChanged?.Invoke(this, bot);
+                        await Task.Delay(delay, ct);
+                    }
                 }
-                else
+
+                if (ct.IsCancellationRequested) break;
+
+                // Execute one cycle
+                try
                 {
-                    await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
-                        $"Plan created: {plan.Goal} ({plan.Steps.Count} steps)");
-
-                    // Step 3: Execute plan steps
-                    await ExecutePlanStepsAsync(inferenceClient, bot, plan, settings, runtime, ct);
-
-                    // Step 4: Synthesize
-                    await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Synthesizing results...");
-                    // Synthesis is done within ExecutePlanStepsAsync
+                    await ExecuteCycleAsync(botId, runtime, ct);
                 }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Bot {BotId} cycle failed", botId);
+                    await HandleBotFailureAsync(botId, ex);
+                }
+
+                // Check whether to continue
+                bot = await _botStore.GetAsync(botId);
+                if (bot is null) break;
+                if (bot.Status is BotStatus.Completed or BotStatus.Stopped) break;
+                if (bot.NextRunAt is null) break;
             }
-            finally
-            {
-                try { await inferenceClient.CloseAsync(); } catch { }
-            }
-
-            // Reschedule
-            bot = await _botStore.GetAsync(botId);
-            if (bot is null) return;
-
-            // Clear retry guidance after a successful execution
-            bot.RetryGuidance = null;
-            bot.LastError = null;
-
-            if (ct.IsCancellationRequested)
-            {
-                bot.Status = BotStatus.Stopped;
-                bot.NextRunAt = null;
-            }
-            else
-            {
-                ComputeNextRun(bot);
-            }
-
-            await _botStore.UpdateAsync(bot);
-            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
-                $"Execution complete. Status: {bot.Status}");
-
-            BotStatusChanged?.Invoke(this, bot);
         }
         catch (OperationCanceledException)
         {
-            await SetBotStatusAsync(botId, BotStatus.Stopped, "Cancelled by user");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Bot {BotId} failed", botId);
-            await HandleBotFailureAsync(botId, runtime, ex);
+            // StopBotAsync already set status to Stopped
         }
         finally
         {
@@ -202,13 +165,123 @@ public class BotEngine : IBotEngine, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes a single bot cycle: drain user messages, plan, execute steps, reschedule.
+    /// </summary>
+    private async Task ExecuteCycleAsync(Guid botId, BotRuntime runtime, CancellationToken ct)
+    {
+        var bot = await _botStore.GetAsync(botId);
+        if (bot is null) return;
+
+        // Drain queued user instructions
+        var userInstructions = new List<string>();
+        while (runtime.UserMessages.TryDequeue(out var msg))
+            userInstructions.Add(msg);
+
+        bot.ExecutionCount++;
+        bot.LastRunAt = DateTime.UtcNow;
+        await _botStore.UpdateAsync(bot);
+
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Starting bot: {bot.Label}");
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Goal: {bot.Goal}");
+
+        if (userInstructions.Count > 0)
+            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info,
+                $"User instructions ({userInstructions.Count})", string.Join("\n", userInstructions));
+
+        if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
+            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning,
+                "Retrying with guidance", bot.RetryGuidance);
+
+        // Step 1: Skill assessment
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Assessing required skills...");
+        var settings = await _settingsService.GetSettingsAsync();
+
+        // Step 2: Plan — check for persisted steps first
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Creating execution plan...");
+
+        var persistedSteps = await _botStore.GetStepsAsync(botId);
+        ActionPlan? prebuiltPlan = null;
+        if (persistedSteps.Count > 0)
+        {
+            prebuiltPlan = new ActionPlan
+            {
+                Goal = bot.Goal,
+                Steps = persistedSteps.Select(s => new ActionItem
+                {
+                    StepNumber = s.StepNumber,
+                    Description = s.Description
+                }).ToList()
+            };
+            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
+                $"Using {persistedSteps.Count} user-defined steps");
+        }
+
+        var inferenceClient = CreateInferenceClient();
+        try
+        {
+            var plan = prebuiltPlan ?? await CreatePlanAsync(inferenceClient, bot, settings, userInstructions, ct);
+            if (plan is null)
+            {
+                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning, "Could not create plan, executing goal directly");
+                await ExecuteDirectAsync(inferenceClient, bot, settings, userInstructions, ct);
+            }
+            else
+            {
+                if (prebuiltPlan is null)
+                {
+                    await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
+                        $"Plan created: {plan.Goal} ({plan.Steps.Count} steps)");
+                }
+
+                FireActionPlanChanged(botId, plan);
+
+                // Step 3: Execute plan steps
+                await ExecutePlanStepsAsync(inferenceClient, bot, plan, settings, userInstructions, ct);
+
+                // Step 4: Synthesize
+                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Synthesizing results...");
+                // Synthesis is done within ExecutePlanStepsAsync
+            }
+        }
+        finally
+        {
+            try { await inferenceClient.CloseAsync(); } catch { }
+        }
+
+        // Reschedule
+        bot = await _botStore.GetAsync(botId);
+        if (bot is null) return;
+
+        // Clear retry guidance after a successful execution
+        bot.RetryGuidance = null;
+        bot.LastError = null;
+
+        if (ct.IsCancellationRequested)
+        {
+            bot.Status = BotStatus.Stopped;
+            bot.NextRunAt = null;
+        }
+        else
+        {
+            ComputeNextRun(bot);
+        }
+
+        await _botStore.UpdateAsync(bot);
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
+            $"Execution complete. Status: {bot.Status}");
+
+        BotStatusChanged?.Invoke(this, bot);
+    }
+
     private async Task<ActionPlan?> CreatePlanAsync(
-        InferenceClient client, BotInstance bot, UserSettings settings, CancellationToken ct)
+        InferenceClient client, BotInstance bot, UserSettings settings,
+        List<string> userInstructions, CancellationToken ct)
     {
         var planRequest = new CreateInferenceRequest
         {
             ModelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName,
-            InitializationPrompt = BuildBotPlanningPrompt(bot),
+            InitializationPrompt = BuildBotPlanningPrompt(bot, userInstructions),
             ThinkLevel = ThinkLevels.Basic
         };
 
@@ -242,7 +315,7 @@ public class BotEngine : IBotEngine, IDisposable
 
     private async Task ExecutePlanStepsAsync(
         InferenceClient client, BotInstance bot, ActionPlan plan,
-        UserSettings settings, BotRuntime runtime, CancellationToken ct)
+        UserSettings settings, List<string> userInstructions, CancellationToken ct)
     {
         var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
 
@@ -250,7 +323,7 @@ public class BotEngine : IBotEngine, IDisposable
         var execRequest = new CreateInferenceRequest
         {
             ModelName = modelName,
-            InitializationPrompt = BuildBotExecutionPrompt(bot),
+            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
             ThinkLevel = ThinkLevels.BasicWithTools
         };
         foreach (var group in settings.GetEnabledToolGroups())
@@ -262,6 +335,9 @@ public class BotEngine : IBotEngine, IDisposable
         foreach (var step in plan.Steps)
         {
             if (ct.IsCancellationRequested) break;
+
+            step.Status = ActionItemStatus.Running;
+            FireActionPlanChanged(bot.Id, plan);
 
             await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepStart,
                 $"Step {step.StepNumber}: {step.Description}");
@@ -290,6 +366,8 @@ public class BotEngine : IBotEngine, IDisposable
                 step.Result = result;
                 stepResults.Add($"Step {step.StepNumber}: {result}");
 
+                FireActionPlanChanged(bot.Id, plan);
+
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepComplete,
                     $"Step {step.StepNumber} complete", result.Length > 500 ? result[..500] : result);
             }
@@ -298,6 +376,8 @@ public class BotEngine : IBotEngine, IDisposable
                 step.Status = ActionItemStatus.Failed;
                 step.Error = ex.Message;
                 stepResults.Add($"Step {step.StepNumber} failed: {ex.Message}");
+
+                FireActionPlanChanged(bot.Id, plan);
 
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
                     $"Step {step.StepNumber} failed: {ex.Message}");
@@ -343,14 +423,14 @@ public class BotEngine : IBotEngine, IDisposable
 
     private async Task ExecuteDirectAsync(
         InferenceClient client, BotInstance bot, UserSettings settings,
-        BotRuntime runtime, CancellationToken ct)
+        List<string> userInstructions, CancellationToken ct)
     {
         var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
 
         var createRequest = new CreateInferenceRequest
         {
             ModelName = modelName,
-            InitializationPrompt = BuildBotExecutionPrompt(bot),
+            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
             ThinkLevel = ThinkLevels.BasicWithTools
         };
         foreach (var group in settings.GetEnabledToolGroups())
@@ -375,41 +455,6 @@ public class BotEngine : IBotEngine, IDisposable
 
         await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
             "Result: " + content.ToString().Trim());
-    }
-
-    public async Task<string> WaitForInputAsync(Guid botId, string question, CancellationToken ct)
-    {
-        var bot = await _botStore.GetAsync(botId);
-        if (bot is null) throw new InvalidOperationException("Bot not found");
-
-        bot.Status = BotStatus.WaitingForInput;
-        bot.PendingQuestion = question;
-        await _botStore.UpdateAsync(bot);
-
-        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.UserPrompt, question);
-        BotStatusChanged?.Invoke(this, bot);
-
-        if (!_runtimes.TryGetValue(botId, out var runtime))
-            throw new InvalidOperationException("Bot runtime not found");
-
-        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        runtime.InputTcs = tcs;
-
-        using var reg = ct.Register(() => tcs.TrySetCanceled());
-        var result = await tcs.Task;
-
-        runtime.InputTcs = null;
-
-        bot = await _botStore.GetAsync(botId);
-        if (bot is not null)
-        {
-            bot.Status = BotStatus.Running;
-            bot.PendingQuestion = null;
-            await _botStore.UpdateAsync(bot);
-            BotStatusChanged?.Invoke(this, bot);
-        }
-
-        return result;
     }
 
     private async void OnSchedulerTick(object? state)
@@ -458,56 +503,21 @@ public class BotEngine : IBotEngine, IDisposable
         }
     }
 
-    private async Task HandleBotFailureAsync(Guid botId, BotRuntime runtime, Exception ex)
+    private async Task HandleBotFailureAsync(Guid botId, Exception ex)
     {
         var bot = await _botStore.GetAsync(botId);
         if (bot is null) return;
 
         bot.LastError = ex.Message;
+        bot.RetryGuidance = $"Previous attempt failed: {ex.Message}";
+        ComputeRetryRun(bot);
         await _botStore.UpdateAsync(bot);
+
         await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Error, $"Execution failed: {ex.Message}");
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info,
+            "Send a message to provide guidance for the next attempt, or use /stop to stop the bot.");
 
-        // Ask the user whether to retry or stop — their response becomes guidance for the next attempt
-        try
-        {
-            var response = await WaitForInputAsync(botId,
-                $"Bot failed: {ex.Message}\nReply 'stop' to stop the bot, or provide guidance for the next attempt.",
-                CancellationToken.None);
-
-            bot = await _botStore.GetAsync(botId);
-            if (bot is null) return;
-
-            if (response.Trim().Equals("stop", StringComparison.OrdinalIgnoreCase))
-            {
-                bot.Status = BotStatus.Stopped;
-                bot.NextRunAt = null;
-                bot.RetryGuidance = null;
-                await _botStore.UpdateAsync(bot);
-                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, "Bot stopped by user after failure");
-                BotStatusChanged?.Invoke(this, bot);
-            }
-            else
-            {
-                bot.RetryGuidance = $"Previous attempt failed: {ex.Message}\nUser guidance: {response.Trim()}";
-                ComputeRetryRun(bot);
-                await _botStore.UpdateAsync(bot);
-                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info,
-                    $"Retrying with user guidance at {bot.NextRunAt:HH:mm:ss}");
-                BotStatusChanged?.Invoke(this, bot);
-            }
-        }
-        catch
-        {
-            // If waiting for input fails (e.g. runtime removed), schedule retry automatically
-            bot = await _botStore.GetAsync(botId);
-            if (bot is not null)
-            {
-                bot.RetryGuidance = $"Previous attempt failed: {ex.Message}";
-                ComputeRetryRun(bot);
-                await _botStore.UpdateAsync(bot);
-                BotStatusChanged?.Invoke(this, bot);
-            }
-        }
+        BotStatusChanged?.Invoke(this, bot);
     }
 
     private void ComputeRetryRun(BotInstance bot)
@@ -566,6 +576,11 @@ public class BotEngine : IBotEngine, IDisposable
         }
     }
 
+    private void FireActionPlanChanged(Guid botId, ActionPlan plan)
+    {
+        ActionPlanChanged?.Invoke(this, new ActionPlanChangedEventArgs { BotId = botId, Plan = plan });
+    }
+
     private InferenceClient CreateInferenceClient()
     {
         var sessionClientFactory = new SessionClientFactory(_keyProvider);
@@ -577,7 +592,7 @@ public class BotEngine : IBotEngine, IDisposable
         return factory.Create();
     }
 
-    private static string BuildBotPlanningPrompt(BotInstance bot)
+    private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot task planner.");
@@ -589,6 +604,14 @@ public class BotEngine : IBotEngine, IDisposable
         {
             sb.AppendLine("IMPORTANT — This is a retry after a previous failure. Adjust your plan accordingly:");
             sb.AppendLine(bot.RetryGuidance);
+            sb.AppendLine();
+        }
+
+        if (userInstructions is { Count: > 0 })
+        {
+            sb.AppendLine("The user has provided the following instructions for this execution:");
+            foreach (var instruction in userInstructions)
+                sb.AppendLine($"- {instruction}");
             sb.AppendLine();
         }
 
@@ -611,7 +634,7 @@ public class BotEngine : IBotEngine, IDisposable
         return sb.ToString();
     }
 
-    private static string BuildBotExecutionPrompt(BotInstance bot)
+    private static string BuildBotExecutionPrompt(BotInstance bot, List<string>? userInstructions = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot executing a task.");
@@ -624,6 +647,14 @@ public class BotEngine : IBotEngine, IDisposable
             sb.AppendLine();
             sb.AppendLine("IMPORTANT — This is a retry after a previous failure. Take the following into account:");
             sb.AppendLine(bot.RetryGuidance);
+        }
+
+        if (userInstructions is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("The user has provided the following instructions for this execution:");
+            foreach (var instruction in userInstructions)
+                sb.AppendLine($"- {instruction}");
         }
 
         sb.AppendLine("Complete each step thoroughly and be concise in your output.");
@@ -665,6 +696,6 @@ public class BotEngine : IBotEngine, IDisposable
         public CancellationTokenSource Cts { get; } = cts;
         public Channel<BotLogEntry> OutputChannel { get; } = outputChannel;
         public Task? ExecutionTask { get; set; }
-        public TaskCompletionSource<string>? InputTcs { get; set; }
+        public ConcurrentQueue<string> UserMessages { get; } = new();
     }
 }

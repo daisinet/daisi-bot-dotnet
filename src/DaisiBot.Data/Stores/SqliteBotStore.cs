@@ -84,4 +84,30 @@ public class SqliteBotStore(IDbContextFactory<DaisiBotDbContext> dbFactory) : IB
         db.BotLogEntries.RemoveRange(entries);
         await db.SaveChangesAsync();
     }
+
+    public async Task<List<BotStep>> GetStepsAsync(Guid botId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.BotSteps
+            .Where(s => s.BotId == botId)
+            .OrderBy(s => s.StepNumber)
+            .ToListAsync();
+    }
+
+    public async Task SetStepsAsync(Guid botId, List<BotStep> steps)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var existing = await db.BotSteps
+            .Where(s => s.BotId == botId)
+            .ToListAsync();
+        db.BotSteps.RemoveRange(existing);
+
+        foreach (var step in steps)
+        {
+            step.BotId = botId;
+            db.BotSteps.Add(step);
+        }
+
+        await db.SaveChangesAsync();
+    }
 }

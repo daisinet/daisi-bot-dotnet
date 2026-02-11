@@ -51,8 +51,11 @@ public class MainScreen : IScreen
             _app.Post(() =>
             {
                 UpdateTitle(state);
-                DrawTitleBar();
-                AnsiConsole.Flush();
+                if (_app.ActiveScreen == this)
+                {
+                    DrawTitleBar();
+                    AnsiConsole.Flush();
+                }
             });
 
         UpdateFocus();

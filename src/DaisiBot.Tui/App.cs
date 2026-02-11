@@ -23,6 +23,9 @@ public class App
     public int Width => Console.WindowWidth;
     public int Height => Console.WindowHeight;
 
+    /// <summary>The currently active/visible main screen.</summary>
+    public IScreen? ActiveScreen => _mainScreen;
+
     public App(IServiceProvider services)
     {
         _services = services;

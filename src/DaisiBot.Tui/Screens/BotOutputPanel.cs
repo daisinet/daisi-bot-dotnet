@@ -23,7 +23,11 @@ public class BotOutputPanel
 
     // Output display
     private readonly List<string> _displayLines = [];
+    private readonly List<bool> _isBoxBorder = [];
+    private readonly List<BotLogLevel> _lineLevel = [];
+    private readonly List<BotLogEntry> _logEntries = [];
     private int _scrollOffset;
+    private int _lastWrapWidth;
 
     // Status
     private string _statusText = "";
@@ -56,6 +60,9 @@ public class BotOutputPanel
     {
         _bot = bot;
         _displayLines.Clear();
+        _isBoxBorder.Clear();
+        _lineLevel.Clear();
+        _logEntries.Clear();
         _scrollOffset = 0;
         _statusText = $"{bot.Label} - {bot.Status}";
 
@@ -66,8 +73,10 @@ public class BotOutputPanel
             var entries = await botStore.GetLogEntriesAsync(bot.Id);
             _app.Post(() =>
             {
+                _logEntries.AddRange(entries);
                 foreach (var entry in entries)
                     AddLogEntryLine(entry);
+                _lastWrapWidth = Width;
                 ScrollToEnd();
                 Draw();
                 AnsiConsole.Flush();
@@ -79,17 +88,34 @@ public class BotOutputPanel
     {
         _bot = null;
         _displayLines.Clear();
+        _isBoxBorder.Clear();
+        _lineLevel.Clear();
+        _logEntries.Clear();
         _statusText = "";
         _scrollOffset = 0;
         Draw();
     }
 
-    public void AppendLogEntry(BotLogEntry entry)
+    public void AppendLogEntry(BotLogEntry entry, bool skipDraw = false)
     {
+        _logEntries.Add(entry);
         AddLogEntryLine(entry);
         ScrollToEnd();
-        DrawOutput();
-        AnsiConsole.Flush();
+        if (!skipDraw)
+        {
+            DrawOutput();
+            AnsiConsole.Flush();
+        }
+    }
+
+    private void RebuildDisplayLines()
+    {
+        _displayLines.Clear();
+        _isBoxBorder.Clear();
+        _lineLevel.Clear();
+        foreach (var entry in _logEntries)
+            AddLogEntryLine(entry);
+        _lastWrapWidth = Width;
     }
 
     public void UpdateStatus(BotInstance bot)
@@ -100,6 +126,36 @@ public class BotOutputPanel
             _statusText = $"{bot.Label} - AWAITING INPUT";
         DrawStatusLine();
         AnsiConsole.Flush();
+    }
+
+    /// <summary>
+    /// Reload log entries from the database and refresh the display.
+    /// Called when BotStatusChanged fires to pick up new entries written during execution.
+    /// </summary>
+    public void RefreshLogEntries()
+    {
+        if (_bot is null) return;
+        var botId = _bot.Id;
+        Task.Run(async () =>
+        {
+            var botStore = _services.GetRequiredService<IBotStore>();
+            var entries = await botStore.GetLogEntriesAsync(botId);
+            _app.Post(() =>
+            {
+                if (_bot?.Id != botId) return; // bot changed while loading
+                var prevCount = _logEntries.Count;
+                if (entries.Count <= prevCount) return; // no new entries
+
+                // Append only the new entries
+                var newEntries = entries.Skip(prevCount).ToList();
+                _logEntries.AddRange(newEntries);
+                foreach (var entry in newEntries)
+                    AddLogEntryLine(entry);
+                ScrollToEnd();
+                DrawOutput();
+                AnsiConsole.Flush();
+            });
+        });
     }
 
     private void AddLogEntryLine(BotLogEntry entry)
@@ -118,20 +174,65 @@ public class BotOutputPanel
             _ => "[Info]"
         };
 
+        var maxWidth = Width - 4 - LeftPadding;
+        if (maxWidth <= 0) maxWidth = 40;
+
+        var level = entry.Level;
+        var isResult = level == BotLogLevel.StepComplete;
+
+        if (isResult)
+        {
+            var borderWidth = maxWidth;
+            _displayLines.Add("\u250C" + new string('\u2500', borderWidth - 2) + "\u2510");
+            _isBoxBorder.Add(true);
+            _lineLevel.Add(level);
+        }
+
         var message = Sanitize(entry.Message);
-        _displayLines.Add($"{prefix} {time} {message}");
+        var headerLine = $"{prefix} {time} {message}";
+        var headerLines = WordWrap(headerLine, maxWidth);
+        foreach (var hl in headerLines)
+        {
+            _displayLines.Add(hl);
+            _isBoxBorder.Add(false);
+            _lineLevel.Add(level);
+        }
 
         if (!string.IsNullOrWhiteSpace(entry.Detail))
         {
-            var maxWidth = Width - 6;
-            if (maxWidth <= 0) maxWidth = 40;
             var lines = WordWrap($"  {entry.Detail}", maxWidth);
-            _displayLines.AddRange(lines);
+            foreach (var dl in lines)
+            {
+                _displayLines.Add(dl);
+                _isBoxBorder.Add(false);
+                _lineLevel.Add(level);
+            }
         }
+
+        if (isResult)
+        {
+            var borderWidth = maxWidth;
+            _displayLines.Add("\u2514" + new string('\u2500', borderWidth - 2) + "\u2518");
+            _isBoxBorder.Add(true);
+            _lineLevel.Add(level);
+        }
+
+        // Blank separator line between entries
+        _displayLines.Add("");
+        _isBoxBorder.Add(false);
+        _lineLevel.Add(BotLogLevel.Info);
     }
 
     public void Draw()
     {
+        // Re-wrap if width changed
+        if (Width != _lastWrapWidth && _logEntries.Count > 0)
+        {
+            var atEnd = _scrollOffset >= Math.Max(0, _displayLines.Count - OutputAreaHeight);
+            RebuildDisplayLines();
+            if (atEnd) ScrollToEnd();
+        }
+
         var contentWidth = Width - 2;
 
         // Title bar
@@ -222,7 +323,16 @@ public class BotOutputPanel
             if (lineIdx < _displayLines.Count)
             {
                 var line = Sanitize(_displayLines[lineIdx]);
-                SetLineColor(line);
+                var isBorder = lineIdx < _isBoxBorder.Count && _isBoxBorder[lineIdx];
+                var level = lineIdx < _lineLevel.Count ? _lineLevel[lineIdx] : BotLogLevel.Info;
+                if (isBorder)
+                {
+                    AnsiConsole.SetForeground(ConsoleColor.Cyan);
+                }
+                else
+                {
+                    SetLevelColor(level);
+                }
                 AnsiConsole.WriteAt(row, Left + 1,
                     PadStr + Truncate(line, textWidth).PadRight(textWidth));
                 AnsiConsole.ResetStyle();
@@ -292,45 +402,42 @@ public class BotOutputPanel
         }
     }
 
-    private static void SetLineColor(string line)
+    private static void SetLevelColor(BotLogLevel level)
     {
-        if (line.StartsWith("[Bot]"))
-            AnsiConsole.SetForeground(ConsoleColor.Green);
-        else if (line.StartsWith("[Error]"))
+        switch (level)
         {
-            AnsiConsole.SetForeground(ConsoleColor.Red);
-            AnsiConsole.SetBold();
+            case BotLogLevel.Info:
+                AnsiConsole.SetForeground(ConsoleColor.Green);
+                break;
+            case BotLogLevel.StepStart:
+                AnsiConsole.SetForeground(ConsoleColor.Magenta);
+                AnsiConsole.SetBold();
+                break;
+            case BotLogLevel.StepComplete:
+                AnsiConsole.SetForeground(ConsoleColor.Cyan);
+                AnsiConsole.SetBold();
+                AnsiConsole.SetBackgroundRgb(0, 40, 50);
+                break;
+            case BotLogLevel.Warning:
+                AnsiConsole.SetForeground(ConsoleColor.DarkYellow);
+                AnsiConsole.SetBold();
+                break;
+            case BotLogLevel.Error:
+                AnsiConsole.SetForeground(ConsoleColor.Red);
+                AnsiConsole.SetBold();
+                break;
+            case BotLogLevel.UserPrompt:
+                AnsiConsole.SetForeground(ConsoleColor.Yellow);
+                AnsiConsole.SetBold();
+                break;
+            case BotLogLevel.UserResponse:
+                AnsiConsole.SetForeground(ConsoleColor.Cyan);
+                break;
+            case BotLogLevel.SkillAction:
+                AnsiConsole.SetForeground(ConsoleColor.Blue);
+                AnsiConsole.SetBold();
+                break;
         }
-        else if (line.StartsWith("[Step]"))
-        {
-            AnsiConsole.SetForeground(ConsoleColor.Magenta);
-            AnsiConsole.SetBold();
-        }
-        else if (line.StartsWith("[Result]"))
-        {
-            AnsiConsole.SetForeground(ConsoleColor.Cyan);
-            AnsiConsole.SetBold();
-            AnsiConsole.SetBackgroundRgb(0, 40, 50);
-        }
-        else if (line.StartsWith("[Input Needed]"))
-        {
-            AnsiConsole.SetForeground(ConsoleColor.Yellow);
-            AnsiConsole.SetBold();
-        }
-        else if (line.StartsWith("[You]"))
-            AnsiConsole.SetForeground(ConsoleColor.Cyan);
-        else if (line.StartsWith("[Warn]"))
-        {
-            AnsiConsole.SetForeground(ConsoleColor.DarkYellow);
-            AnsiConsole.SetBold();
-        }
-        else if (line.StartsWith("[Skill]"))
-        {
-            AnsiConsole.SetForeground(ConsoleColor.Blue);
-            AnsiConsole.SetBold();
-        }
-        else if (line.StartsWith("[System]"))
-            AnsiConsole.SetForeground(ConsoleColor.DarkCyan);
     }
 
     public bool HandleKey(ConsoleKeyInfo key)
@@ -514,11 +621,15 @@ public class BotOutputPanel
                             if (result == "__CLEAR__")
                             {
                                 _displayLines.Clear();
+                                _isBoxBorder.Clear();
+                                _lineLevel.Clear();
                                 _scrollOffset = 0;
                             }
                             else
                             {
                                 _displayLines.Add($"[System] {result}");
+                                _isBoxBorder.Add(false);
+                                _lineLevel.Add(BotLogLevel.Info);
                                 ScrollToEnd();
                             }
                             Draw();
@@ -528,23 +639,30 @@ public class BotOutputPanel
                 });
             }
         }
-        else if (_bot is not null && _bot.Status == BotStatus.WaitingForInput)
+        else if (_bot is not null)
         {
-            // Send input to bot
             var botEngine = _services.GetRequiredService<IBotEngine>();
-            _displayLines.Add($"[You] {DateTime.Now:HH:mm:ss} {input}");
-            ScrollToEnd();
-            Draw();
-            AnsiConsole.Flush();
+            if (botEngine.IsRunning(_bot.Id))
+            {
+                // Queue instruction for the next execution cycle
+                _displayLines.Add($"[You] {DateTime.Now:HH:mm:ss} {input}");
+                _isBoxBorder.Add(false);
+                _lineLevel.Add(BotLogLevel.UserResponse);
+                ScrollToEnd();
+                Draw();
+                AnsiConsole.Flush();
 
-            Task.Run(async () => await botEngine.SendInputAsync(_bot.Id, input));
-        }
-        else
-        {
-            _displayLines.Add($"[System] Bot is not waiting for input. Use / for commands.");
-            ScrollToEnd();
-            Draw();
-            AnsiConsole.Flush();
+                Task.Run(async () => await botEngine.SendInputAsync(_bot.Id, input));
+            }
+            else
+            {
+                _displayLines.Add($"[System] Bot is not running. Use /start to start it.");
+                _isBoxBorder.Add(false);
+                _lineLevel.Add(BotLogLevel.Info);
+                ScrollToEnd();
+                Draw();
+                AnsiConsole.Flush();
+            }
         }
 
         DrawInputLine();
@@ -560,12 +678,16 @@ public class BotOutputPanel
     public void AddSystemMessage(string message)
     {
         _displayLines.Add($"[System] {message}");
+        _isBoxBorder.Add(false);
+        _lineLevel.Add(BotLogLevel.Info);
         ScrollToEnd();
     }
 
     public void ClearOutput()
     {
         _displayLines.Clear();
+        _isBoxBorder.Clear();
+        _lineLevel.Clear();
         _scrollOffset = 0;
         Draw();
     }

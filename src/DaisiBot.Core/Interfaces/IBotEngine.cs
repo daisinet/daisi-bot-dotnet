@@ -9,4 +9,5 @@ public interface IBotEngine
     Task SendInputAsync(Guid botId, string userInput);
     bool IsRunning(Guid botId);
     event EventHandler<BotInstance>? BotStatusChanged;
+    event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
 }

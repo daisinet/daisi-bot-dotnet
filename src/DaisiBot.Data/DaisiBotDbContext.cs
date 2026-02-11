@@ -17,6 +17,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<BotInstance> Bots => Set<BotInstance>();
     public DbSet<BotLogEntry> BotLogEntries => Set<BotLogEntry>();
+    public DbSet<BotStep> BotSteps => Set<BotStep>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,6 +73,12 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             e.HasKey(l => l.Id);
             e.HasIndex(l => l.BotId);
         });
+
+        modelBuilder.Entity<BotStep>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.BotId);
+        });
     }
 
     public static string GetDatabasePath()
@@ -114,6 +121,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             ("BatchSize", "ALTER TABLE Settings ADD COLUMN BatchSize INTEGER NOT NULL DEFAULT 512"),
             ("NetworkHostEnabled", "ALTER TABLE Settings ADD COLUMN NetworkHostEnabled INTEGER NOT NULL DEFAULT 0"),
             ("LastScreen", "ALTER TABLE Settings ADD COLUMN LastScreen TEXT NOT NULL DEFAULT 'bots'"),
+            ("StatusPanelVisible", "ALTER TABLE Settings ADD COLUMN StatusPanelVisible INTEGER NOT NULL DEFAULT 1"),
         ];
 
         foreach (var (name, sql) in migrations)
@@ -210,6 +218,28 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_BotLogEntries_BotId ON BotLogEntries (BotId)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Ensure BotSteps table exists
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS BotSteps (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    BotId TEXT NOT NULL,
+                    StepNumber INTEGER NOT NULL DEFAULT 0,
+                    Description TEXT NOT NULL DEFAULT '',
+                    CreatedAt TEXT NOT NULL
+                )
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Index on BotSteps.BotId
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_BotSteps_BotId ON BotSteps (BotId)";
             await cmd.ExecuteNonQueryAsync();
         }
 

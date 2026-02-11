@@ -29,6 +29,7 @@ public class UserSettings
 
     // UI state
     public string LastScreen { get; set; } = "bots";
+    public bool StatusPanelVisible { get; set; } = true;
 
     public List<ToolGroupSelection> GetEnabledToolGroups()
     {

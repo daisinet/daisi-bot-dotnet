@@ -16,13 +16,16 @@ public class BotMainScreen : IScreen
     private readonly ISettingsService _settingsService;
     private readonly BotSidebarPanel _sidebar;
     private readonly BotOutputPanel _outputPanel;
+    private readonly BotStatusPanel _statusPanel;
     private readonly SlashCommandDispatcher _commandDispatcher;
 
     private BotInstance? _currentBot;
     private string _titleText = "Daisi Bot - Bots";
     private bool _hostMode;
+    private bool _statusPanelVisible = true;
 
     private const int SidebarWidth = 24;
+    private const int StatusPanelWidth = 30;
 
     private enum FocusTarget { Sidebar, Output }
     private FocusTarget _focus = FocusTarget.Sidebar;
@@ -37,11 +40,14 @@ public class BotMainScreen : IScreen
         _botEngine = _services.GetRequiredService<IBotEngine>();
         _settingsService = _services.GetRequiredService<ISettingsService>();
 
-        _sidebar = new BotSidebarPanel(app, _botStore);
+        _sidebar = new BotSidebarPanel(app, _botStore) { IsScreenActive = () => IsActive };
         _outputPanel = new BotOutputPanel(app, _services);
+        _statusPanel = new BotStatusPanel();
 
         _commandDispatcher = new SlashCommandDispatcher(app, _services, "bot");
         _commandDispatcher.OnBotDeleted = OnBotKilledViaCommand;
+        _commandDispatcher.OnStatusToggle = OnStatusToggle;
+        _commandDispatcher.OnBotUpdated = OnBotUpdated;
         _outputPanel.CommandDispatcher = _commandDispatcher;
 
         _sidebar.BotSelected += OnBotSelected;
@@ -49,6 +55,7 @@ public class BotMainScreen : IScreen
         _sidebar.DeleteBotRequested += OnDeleteBot;
 
         _botEngine.BotStatusChanged += OnBotStatusChanged;
+        _botEngine.ActionPlanChanged += OnActionPlanChanged;
 
         UpdateFocus();
         LoadInitial();
@@ -60,6 +67,7 @@ public class BotMainScreen : IScreen
         {
             var settings = await _settingsService.GetSettingsAsync();
             _hostMode = settings.HostModeEnabled;
+            _statusPanelVisible = settings.StatusPanelVisible;
 
             var authService = _services.GetRequiredService<IAuthService>();
             var authState = await authService.GetAuthStateAsync();
@@ -81,18 +89,87 @@ public class BotMainScreen : IScreen
         });
     }
 
+    private bool IsActive => _app.ActiveScreen == this;
+
+    private void OnActionPlanChanged(object? sender, ActionPlanChangedEventArgs e)
+    {
+        _app.Post(() =>
+        {
+            if (_currentBot?.Id != e.BotId) return;
+
+            _statusPanel.SetPlan(e.Plan);
+            if (!_statusPanelVisible)
+            {
+                _statusPanelVisible = true;
+            }
+
+            if (IsActive)
+            {
+                _outputPanel.RefreshLogEntries();
+                Draw();
+                AnsiConsole.Flush();
+            }
+        });
+    }
+
+    private void OnStatusToggle()
+    {
+        _statusPanelVisible = !_statusPanelVisible;
+        if (!_statusPanelVisible)
+            _statusPanel.Clear();
+        Draw();
+        AnsiConsole.Flush();
+
+        Task.Run(async () =>
+        {
+            var settings = await _settingsService.GetSettingsAsync();
+            settings.StatusPanelVisible = _statusPanelVisible;
+            await _settingsService.SaveSettingsAsync(settings);
+        });
+    }
+
+    private void OnBotUpdated()
+    {
+        _sidebar.LoadBots();
+        if (_currentBot is not null)
+        {
+            Task.Run(async () =>
+            {
+                var fresh = await _botStore.GetAsync(_currentBot.Id);
+                if (fresh is not null)
+                {
+                    _app.Post(() =>
+                    {
+                        _currentBot = fresh;
+                        _commandDispatcher.CurrentBot = fresh;
+                        _statusPanel.SetBot(fresh);
+                        _outputPanel.SetBot(fresh);
+                        Draw();
+                        AnsiConsole.Flush();
+                    });
+                }
+            });
+        }
+    }
+
     private void OnBotStatusChanged(object? sender, BotInstance bot)
     {
         _app.Post(() =>
         {
+            // Always update data so it's current when screen becomes active
             _sidebar.UpdateFlashingBots(bot);
-            _sidebar.LoadBots();
+            _sidebar.LoadBots(skipDraw: !IsActive);
 
             if (_currentBot?.Id == bot.Id)
             {
                 _currentBot = bot;
                 _commandDispatcher.CurrentBot = bot;
-                _outputPanel.UpdateStatus(bot);
+                _statusPanel.SetBot(bot);
+                if (IsActive)
+                {
+                    _outputPanel.UpdateStatus(bot);
+                    _outputPanel.RefreshLogEntries();
+                }
             }
 
             // Audio notification for WaitingForInput
@@ -107,11 +184,11 @@ public class BotMainScreen : IScreen
                         BotId = bot.Id,
                         Level = BotLogLevel.UserPrompt,
                         Message = bot.PendingQuestion
-                    });
+                    }, skipDraw: !IsActive);
                 }
             }
 
-            AnsiConsole.Flush();
+            if (IsActive) AnsiConsole.Flush();
         });
     }
 
@@ -135,6 +212,8 @@ public class BotMainScreen : IScreen
         var w = _app.Width;
         var h = _app.Height;
 
+        var statusWidth = _statusPanelVisible ? StatusPanelWidth : 0;
+
         _sidebar.Top = 1;
         _sidebar.Left = 0;
         _sidebar.Width = SidebarWidth;
@@ -142,12 +221,27 @@ public class BotMainScreen : IScreen
 
         _outputPanel.Top = 1;
         _outputPanel.Left = SidebarWidth;
-        _outputPanel.Width = w - SidebarWidth;
+        _outputPanel.Width = w - SidebarWidth - statusWidth;
         _outputPanel.Height = h - 2;
+
+        if (_statusPanelVisible)
+        {
+            _statusPanel.Top = 1;
+            _statusPanel.Left = w - statusWidth;
+            _statusPanel.Width = statusWidth;
+            _statusPanel.Height = h - 2;
+            _statusPanel.IsVisible = true;
+        }
+        else
+        {
+            _statusPanel.IsVisible = false;
+        }
 
         DrawTitleBar();
         _sidebar.Draw();
         _outputPanel.Draw();
+        if (_statusPanelVisible)
+            _statusPanel.Draw();
         DrawStatusBar();
     }
 
@@ -225,6 +319,8 @@ public class BotMainScreen : IScreen
         _commandDispatcher.CurrentBot = bot;
         _focus = FocusTarget.Output;
         UpdateFocus();
+        _statusPanel.SetBot(bot);
+        _statusPanel.SetPlan(null);
         _outputPanel.SetBot(bot);
         Draw();
         AnsiConsole.Flush();
@@ -237,6 +333,8 @@ public class BotMainScreen : IScreen
             _sidebar.LoadBots();
             _currentBot = bot;
             _commandDispatcher.CurrentBot = bot;
+            _statusPanel.SetBot(bot);
+            _statusPanel.SetPlan(null);
             _outputPanel.SetBot(bot);
             _focus = FocusTarget.Output;
             UpdateFocus();
@@ -256,6 +354,8 @@ public class BotMainScreen : IScreen
                 var idToDelete = _currentBot.Id;
                 _currentBot = null;
                 _commandDispatcher.CurrentBot = null;
+                _statusPanel.SetBot(null);
+                _statusPanel.SetPlan(null);
                 Task.Run(async () =>
                 {
                     var engine = _services.GetRequiredService<IBotEngine>();
@@ -290,6 +390,8 @@ public class BotMainScreen : IScreen
     {
         _currentBot = null;
         _commandDispatcher.CurrentBot = null;
+        _statusPanel.SetBot(null);
+        _statusPanel.SetPlan(null);
         _outputPanel.ClearBot();
         _sidebar.LoadBots(onLoaded: () =>
         {

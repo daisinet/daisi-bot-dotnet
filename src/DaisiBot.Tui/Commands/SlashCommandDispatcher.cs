@@ -19,6 +19,12 @@ public class SlashCommandDispatcher
     /// <summary>Callback invoked after a bot is killed+deleted so the screen can refresh.</summary>
     public Action? OnBotDeleted { get; set; }
 
+    /// <summary>Callback invoked when the status panel should be toggled.</summary>
+    public Action? OnStatusToggle { get; set; }
+
+    /// <summary>Callback invoked after a bot has been updated via /update.</summary>
+    public Action? OnBotUpdated { get; set; }
+
     public SlashCommandDispatcher(App app, IServiceProvider services, string context)
     {
         _handlers["help"] = new HelpCommandHandler(app).HandleAsync;
@@ -39,6 +45,7 @@ public class SlashCommandDispatcher
         {
             _handlers["start"] = new StartCommandHandler(services, this).HandleAsync;
             _handlers["stop"] = new StopCommandHandler(services, this).HandleAsync;
+            _handlers["update"] = new UpdateCommandHandler(app, services, this).HandleAsync;
         }
     }
 
