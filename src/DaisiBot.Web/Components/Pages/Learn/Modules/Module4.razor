@@ -1,0 +1,197 @@
+@page "/learn/conversations"
+@layout DaisiBot.Web.Components.Pages.Learn.LearnLayout
+
+<h1 class="font-accent mb-4">Module 4 &middot; <span class="text-accent">Conversations &amp; Chat</span></h1>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Anatomy of a Conversation</h4>
+    <p>
+        Every conversation is a self-contained context with its own model, system prompt,
+        think level, and message history. Key fields:
+    </p>
+    <table class="table table-dark table-bordered">
+        <thead>
+            <tr><th style="width:25%;">Field</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td class="text-accent">Title</td><td>Display name (auto-generated or user-set)</td></tr>
+            <tr><td class="text-accent">ModelName</td><td>Which model processes this conversation</td></tr>
+            <tr><td class="text-accent">SystemPrompt</td><td>Persona / instructions prepended to every request</td></tr>
+            <tr><td class="text-accent">ThinkLevel</td><td>Reasoning depth (see below)</td></tr>
+            <tr><td class="text-accent">Messages</td><td>Ordered list of ChatMessage objects (cascade-deleted with the conversation)</td></tr>
+            <tr><td class="text-accent">IsArchived</td><td>Hides the conversation without deleting it</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Think Levels</h4>
+    <p>
+        Think levels are the most powerful knob in DaisiBot. They control how deeply the
+        model reasons before responding.
+    </p>
+    <table class="table table-dark table-bordered">
+        <thead>
+            <tr><th style="width:22%;">Level</th><th>Behavior</th><th style="width:20%;">Tools?</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="badge bg-secondary">Basic</span></td>
+                <td>Direct inference &mdash; fast, simple answers.</td>
+                <td>No</td>
+            </tr>
+            <tr>
+                <td><span class="badge" style="background:#5a3d2d; color:#ff9800;">BasicWithTools</span></td>
+                <td>Direct inference with access to enabled tool groups.</td>
+                <td>Yes</td>
+            </tr>
+            <tr>
+                <td><span class="badge" style="background:#2d3d5a; color:#2196f3;">Skilled</span></td>
+                <td>
+                    Single-pass reasoning with visible thinking. The model reasons through the
+                    entire problem in one inference call, "thinking out loud" as it works toward
+                    an answer. Good for complex questions that benefit from visible reasoning.
+                </td>
+                <td>Yes</td>
+            </tr>
+            <tr>
+                <td><span class="badge" style="background:#3d2d5a; color:#9c27b0;">Agent</span></td>
+                <td>
+                    Autonomous multi-step execution. Instead of answering in a single pass, the
+                    model first <strong>plans</strong> a set of steps, then <strong>executes</strong>
+                    each step individually (with full tool access), and finally
+                    <strong>synthesizes</strong> all results into a single response. This
+                    plan&ndash;execute&ndash;synthesize loop lets the model break down complex
+                    tasks and tackle them methodically.
+                </td>
+                <td>Yes</td>
+            </tr>
+        </tbody>
+    </table>
+    <p class="mb-0">
+        Not every model supports every level. The <code>AvailableModel</code> object exposes
+        a <code>SupportedThinkLevels</code> list. Both Skilled and Agent work with any model
+        that supports reasoning, though Agent benefits from models that produce structured plans.
+    </p>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Streaming Responses</h4>
+    <p>
+        DaisiBot streams every response as an <code>IAsyncEnumerable&lt;StreamChunk&gt;</code>.
+        Each chunk carries:
+    </p>
+    <ul>
+        <li><strong>Content</strong> &ndash; The text fragment.</li>
+        <li><strong>Type</strong> &ndash; Text, Thinking, Tooling, ToolContent, Error, Image, or Audio.</li>
+        <li><strong>IsComplete</strong> &ndash; <code>true</code> on the final chunk.</li>
+    </ul>
+    <p class="mb-0">
+        The UI renders text chunks progressively (typewriter effect) and separates
+        <em>Thinking</em> chunks into a collapsible section so you can see the model's
+        chain-of-thought without cluttering the response.
+    </p>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Message Types</h4>
+    <p>Each <code>ChatMessage</code> has a Role and a Type:</p>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <h6 class="text-accent">Roles</h6>
+            <ul class="text-muted">
+                <li><strong>System</strong> &ndash; Hidden instructions</li>
+                <li><strong>User</strong> &ndash; Your input</li>
+                <li><strong>Assistant</strong> &ndash; Model response</li>
+                <li><strong>Tool</strong> &ndash; Tool execution result</li>
+            </ul>
+        </div>
+        <div class="col-md-6">
+            <h6 class="text-accent">Types</h6>
+            <ul class="text-muted">
+                <li><strong>Text</strong> &ndash; Normal content</li>
+                <li><strong>Thinking</strong> &ndash; Chain-of-thought</li>
+                <li><strong>Tooling</strong> &ndash; Tool invocation</li>
+                <li><strong>ToolContent</strong> &ndash; Tool output</li>
+                <li><strong>Error / Image / Audio</strong></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Slash Commands (TUI)</h4>
+    <p>
+        In the terminal client, type <code>/</code> to open the autocomplete popup.
+        The top 5 matches appear and you navigate with Up/Down, complete with Tab or Enter.
+    </p>
+    <table class="table table-dark table-bordered">
+        <thead>
+            <tr><th style="width:25%;">Command</th><th>What It Does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td class="text-accent">/new</td><td>Create a new conversation</td></tr>
+            <tr><td class="text-accent">/list</td><td>Show all conversations</td></tr>
+            <tr><td class="text-accent">/model</td><td>Open the model picker</td></tr>
+            <tr><td class="text-accent">/settings</td><td>Open the settings dialog</td></tr>
+            <tr><td class="text-accent">/skills</td><td>Open the skill browser</td></tr>
+            <tr><td class="text-accent">/install &lt;skill&gt;</td><td>Install a skill by name</td></tr>
+            <tr><td class="text-accent">/login</td><td>Start the OTP authentication flow</td></tr>
+            <tr><td class="text-accent">/status</td><td>Show bot status or all bots</td></tr>
+            <tr><td class="text-accent">/runnow</td><td>Run a selected bot immediately</td></tr>
+            <tr><td class="text-accent">/kill</td><td>Stop and delete a bot (with confirmation)</td></tr>
+            <tr><td class="text-accent">/export</td><td>Export the current conversation</td></tr>
+            <tr><td class="text-accent">/clear</td><td>Clear the screen</td></tr>
+            <tr><td class="text-accent">/help</td><td>Show help information</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="glass-card mb-4">
+    <h4 class="font-accent">Chat Statistics</h4>
+    <p class="mb-0">
+        After every response, DaisiBot tracks <strong>token count</strong>,
+        <strong>compute time</strong>, and <strong>tokens per second</strong> for both the
+        last message and the running session total. In the TUI these appear in the
+        <code>ChatStatsBar</code>; in MAUI/Web they appear below each message bubble.
+        Use these to compare model performance and estimate costs.
+    </p>
+</div>
+
+<div class="glass-card recall-checkpoint">
+    <h4 class="font-accent">Active Recall Checkpoint</h4>
+    <p>Cover the answers and test yourself before peeking.</p>
+
+    <div class="recall-question">
+        <p><strong>1.</strong> Name the four think levels in order from simplest to deepest.</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Basic, BasicWithTools, Skilled, Agent.</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>2.</strong> What is the difference between Skilled and Agent think levels?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Skilled reasons through the problem in a single inference pass with visible thinking. Agent breaks the task into a multi-step plan, executes each step individually with tool access, then synthesizes all results into a final answer.</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>3.</strong> What three properties does a <code>StreamChunk</code> carry?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Content (text fragment), Type (Text/Thinking/Tooling/etc.), and IsComplete (boolean).</p>
+        </details>
+    </div>
+
+    <div class="recall-question">
+        <p><strong>4.</strong> How do you trigger slash command autocomplete in the TUI?</p>
+        <details><summary class="text-accent">Reveal answer</summary>
+            <p class="mt-2">Type <code>/</code> to open the autocomplete popup, then navigate with Up/Down and complete with Tab or Enter.</p>
+        </details>
+    </div>
+</div>
+
+<div class="d-flex justify-content-between mt-4">
+    <a href="/learn/configuration" class="btn btn-outline-light">&larr; Module 3</a>
+    <a href="/learn/skills" class="btn btn-accent">Module 5: Skills &rarr;</a>
+</div>
