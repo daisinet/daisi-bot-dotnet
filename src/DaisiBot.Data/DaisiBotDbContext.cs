@@ -122,6 +122,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             ("NetworkHostEnabled", "ALTER TABLE Settings ADD COLUMN NetworkHostEnabled INTEGER NOT NULL DEFAULT 0"),
             ("LastScreen", "ALTER TABLE Settings ADD COLUMN LastScreen TEXT NOT NULL DEFAULT 'bots'"),
             ("StatusPanelVisible", "ALTER TABLE Settings ADD COLUMN StatusPanelVisible INTEGER NOT NULL DEFAULT 1"),
+            ("LocalhostModeEnabled", "ALTER TABLE Settings ADD COLUMN LocalhostModeEnabled INTEGER NOT NULL DEFAULT 0"),
         ];
 
         foreach (var (name, sql) in migrations)
@@ -132,9 +133,10 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // Data migration: default existing users to host mode
-        await using (var cmd = conn.CreateCommand())
+        // Data migration: default existing users to host mode (only when column was just added)
+        if (!existingColumns.Contains("HostModeEnabled"))
         {
+            await using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE Settings SET HostModeEnabled = 1 WHERE HostModeEnabled = 0";
             await cmd.ExecuteNonQueryAsync();
         }

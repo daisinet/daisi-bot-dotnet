@@ -161,11 +161,22 @@ public class BotOutputPanel
     private void AddLogEntryLine(BotLogEntry entry)
     {
         var time = entry.Timestamp.ToLocalTime().ToString("HH:mm:ss");
+        var stepLabel = "";
+        if (entry.Level is BotLogLevel.StepStart or BotLogLevel.StepComplete
+            && entry.Message.StartsWith("Step "))
+        {
+            var spaceIdx = entry.Message.IndexOf(' ', 5);
+            if (spaceIdx < 0) spaceIdx = entry.Message.Length;
+            var colonIdx = entry.Message.IndexOf(':', 5);
+            if (colonIdx > 0 && colonIdx < spaceIdx) spaceIdx = colonIdx;
+            stepLabel = " " + entry.Message[5..spaceIdx];
+        }
+
         var prefix = entry.Level switch
         {
             BotLogLevel.Info => "[Bot]",
-            BotLogLevel.StepStart => "[Step] \u25B6",
-            BotLogLevel.StepComplete => "[Result] \u2713",
+            BotLogLevel.StepStart => $"[Step{stepLabel}] \u25B6",
+            BotLogLevel.StepComplete => $"[Step{stepLabel}] \u2713",
             BotLogLevel.Warning => "[Warn] \u26A0",
             BotLogLevel.Error => "[Error] \u2717",
             BotLogLevel.UserPrompt => "[Input Needed]",

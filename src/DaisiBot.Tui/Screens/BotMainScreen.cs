@@ -1,3 +1,4 @@
+using Daisi.SDK.Models;
 using DaisiBot.Core.Enums;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
@@ -14,6 +15,7 @@ public class BotMainScreen : IScreen
     private readonly IBotStore _botStore;
     private readonly IBotEngine _botEngine;
     private readonly ISettingsService _settingsService;
+    private readonly IAuthService _authService;
     private readonly BotSidebarPanel _sidebar;
     private readonly BotOutputPanel _outputPanel;
     private readonly BotStatusPanel _statusPanel;
@@ -22,6 +24,7 @@ public class BotMainScreen : IScreen
     private BotInstance? _currentBot;
     private string _titleText = "Daisi Bot - Bots";
     private bool _hostMode;
+    private bool _localhostMode;
     private bool _statusPanelVisible = true;
 
     private const int SidebarWidth = 24;
@@ -39,6 +42,7 @@ public class BotMainScreen : IScreen
         _botStore = _services.GetRequiredService<IBotStore>();
         _botEngine = _services.GetRequiredService<IBotEngine>();
         _settingsService = _services.GetRequiredService<ISettingsService>();
+        _authService = _services.GetRequiredService<IAuthService>();
 
         _sidebar = new BotSidebarPanel(app, _botStore) { IsScreenActive = () => IsActive };
         _outputPanel = new BotOutputPanel(app, _services);
@@ -56,6 +60,7 @@ public class BotMainScreen : IScreen
 
         _botEngine.BotStatusChanged += OnBotStatusChanged;
         _botEngine.ActionPlanChanged += OnActionPlanChanged;
+        _botEngine.BotLogEntryAdded += OnBotLogEntryAdded;
 
         UpdateFocus();
         LoadInitial();
@@ -68,6 +73,14 @@ public class BotMainScreen : IScreen
             var settings = await _settingsService.GetSettingsAsync();
             _hostMode = settings.HostModeEnabled;
             _statusPanelVisible = settings.StatusPanelVisible;
+#if DEBUG
+            _localhostMode = settings.LocalhostModeEnabled;
+            if (_localhostMode)
+            {
+                DaisiStaticSettings.ApplyUserSettings("localhost", 5001, true);
+                _authService.AppId = "app-debug";
+            }
+#endif
 
             var authService = _services.GetRequiredService<IAuthService>();
             var authState = await authService.GetAuthStateAsync();
@@ -105,7 +118,6 @@ public class BotMainScreen : IScreen
 
             if (IsActive)
             {
-                _outputPanel.RefreshLogEntries();
                 Draw();
                 AnsiConsole.Flush();
             }
@@ -168,7 +180,6 @@ public class BotMainScreen : IScreen
                 if (IsActive)
                 {
                     _outputPanel.UpdateStatus(bot);
-                    _outputPanel.RefreshLogEntries();
                 }
             }
 
@@ -188,6 +199,16 @@ public class BotMainScreen : IScreen
                 }
             }
 
+            if (IsActive) AnsiConsole.Flush();
+        });
+    }
+
+    private void OnBotLogEntryAdded(object? sender, BotLogEntry entry)
+    {
+        _app.Post(() =>
+        {
+            if (_currentBot?.Id != entry.BotId) return;
+            _outputPanel.AppendLogEntry(entry, skipDraw: !IsActive);
             if (IsActive) AnsiConsole.Flush();
         });
     }
@@ -257,7 +278,11 @@ public class BotMainScreen : IScreen
     {
         var w = _app.Width;
         var row = _app.Height - 1;
+#if DEBUG
+        var modeLabel = _localhostMode ? "F7:Localhost" : (_hostMode ? "F7:DaisiNet" : "F7:SelfHost");
+#else
         var modeLabel = _hostMode ? "F7:DaisiNet" : "F7:SelfHost";
+#endif
         var bar = $" F1:Bots  F2:Chats  F3:Model  F4:Settings  F5:Login  F6:Skills  {modeLabel}  F10:Quit ";
         AnsiConsole.SetReverse();
         var padded = bar.Length >= w ? bar[..w] : bar + new string(' ', w - bar.Length);
@@ -411,6 +436,84 @@ public class BotMainScreen : IScreen
 
     private void ShowHostModeToggle()
     {
+#if DEBUG
+        var currentIndex = _localhostMode ? 2 : (_hostMode ? 0 : 1);
+        var dialog = new HostModeDialog(_app, currentIndex, selection =>
+        {
+            switch (selection)
+            {
+                case 0: // SelfHost
+                    _hostMode = true;
+                    _localhostMode = false;
+                    Task.Run(async () =>
+                    {
+                        var settings = await _settingsService.GetSettingsAsync();
+                        settings.HostModeEnabled = true;
+                        settings.LocalhostModeEnabled = false;
+                        await _settingsService.SaveSettingsAsync(settings);
+                        DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
+                        _authService.AppId = "app-260209122215-qakyd";
+                        await _botEngine.RestartAllBotsAsync();
+                        _app.Post(() =>
+                        {
+                            _outputPanel.ClearBot();
+                            _statusPanel.Clear();
+                            _sidebar.LoadBots();
+                            Draw();
+                            AnsiConsole.Flush();
+                        });
+                    });
+                    break;
+
+                case 1: // DaisiNet
+                    _hostMode = false;
+                    _localhostMode = false;
+                    Task.Run(async () =>
+                    {
+                        var settings = await _settingsService.GetSettingsAsync();
+                        settings.HostModeEnabled = false;
+                        settings.LocalhostModeEnabled = false;
+                        await _settingsService.SaveSettingsAsync(settings);
+                        DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
+                        _authService.AppId = "app-260209122215-qakyd";
+                        await _botEngine.RestartAllBotsAsync();
+                        _app.Post(() =>
+                        {
+                            _outputPanel.ClearBot();
+                            _statusPanel.Clear();
+                            _sidebar.LoadBots();
+                            Draw();
+                            AnsiConsole.Flush();
+                        });
+                    });
+                    break;
+
+                case 2: // Localhost
+                    _hostMode = false;
+                    _localhostMode = true;
+                    Task.Run(async () =>
+                    {
+                        var settings = await _settingsService.GetSettingsAsync();
+                        settings.LocalhostModeEnabled = true;
+                        settings.HostModeEnabled = false;
+                        await _settingsService.SaveSettingsAsync(settings);
+                        DaisiStaticSettings.ApplyUserSettings("localhost", 5001, true);
+                        _authService.AppId = "app-debug";
+                        await _botEngine.RestartAllBotsAsync();
+                        _app.Post(() =>
+                        {
+                            _outputPanel.ClearBot();
+                            _statusPanel.Clear();
+                            _sidebar.LoadBots();
+                            Draw();
+                            AnsiConsole.Flush();
+                        });
+                    });
+                    break;
+            }
+        });
+        _app.RunModal(dialog);
+#else
         var message = _hostMode
             ? "Switch to DaisiNet? Your credits will be spent and charges may apply depending on your setup."
             : "Enable Self-Hosted mode? When your bots are idle, your system will process requests for others on the network.";
@@ -425,14 +528,19 @@ public class BotMainScreen : IScreen
                     var settings = await _settingsService.GetSettingsAsync();
                     settings.HostModeEnabled = _hostMode;
                     await _settingsService.SaveSettingsAsync(settings);
+                    await _botEngine.RestartAllBotsAsync();
                     _app.Post(() =>
                     {
-                        DrawStatusBar();
+                        _outputPanel.ClearBot();
+                        _statusPanel.Clear();
+                        _sidebar.LoadBots();
+                        Draw();
                         AnsiConsole.Flush();
                     });
                 });
             }
         });
         _app.RunModal(confirmDialog);
+#endif
     }
 }

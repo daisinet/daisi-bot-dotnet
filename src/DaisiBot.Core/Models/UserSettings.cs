@@ -20,6 +20,7 @@ public class UserSettings
 
     // Host mode settings
     public bool HostModeEnabled { get; set; } = true;
+    public bool LocalhostModeEnabled { get; set; }
     public string ModelFolderPath { get; set; } = string.Empty;
     public int LlamaRuntime { get; set; }
     public uint ContextSize { get; set; } = 2048;

@@ -13,6 +13,8 @@ public class DaisiBotAuthService : IAuthService
     private readonly SqliteAuthStateStore _authStore;
     private AuthState _currentState = new();
 
+    public string AppId { get; set; } = "app-260209122215-qakyd";
+
     public event EventHandler<AuthState>? AuthStateChanged;
 
     public DaisiBotAuthService(
@@ -51,7 +53,7 @@ public class DaisiBotAuthService : IAuthService
         {
             EmailOrPhone = emailOrPhone,
             AuthCode = code,
-            AppId = "app-260209122215-qakyd"
+            AppId = AppId
         };
 
         var response = await client.ValidateAuthCodeAsync(request);
