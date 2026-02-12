@@ -26,6 +26,9 @@ public class App
     /// <summary>The currently active/visible main screen.</summary>
     public IScreen? ActiveScreen => _mainScreen;
 
+    /// <summary>True when a modal dialog is open — screens should defer drawing.</summary>
+    public bool IsModalOpen => _modalStack.Count > 0;
+
     public App(IServiceProvider services)
     {
         _services = services;

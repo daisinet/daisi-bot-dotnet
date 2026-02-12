@@ -6,8 +6,11 @@ public interface IBotEngine
 {
     Task StartBotAsync(Guid botId);
     Task StopBotAsync(Guid botId);
+    Task StopAllBotsAsync();
+    Task RestartAllBotsAsync();
     Task SendInputAsync(Guid botId, string userInput);
     bool IsRunning(Guid botId);
     event EventHandler<BotInstance>? BotStatusChanged;
     event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
+    event EventHandler<BotLogEntry>? BotLogEntryAdded;
 }

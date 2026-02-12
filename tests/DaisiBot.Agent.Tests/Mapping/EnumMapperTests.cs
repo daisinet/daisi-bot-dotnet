@@ -57,6 +57,14 @@ public class EnumMapperTests
     [InlineData(ToolGroupSelection.MediaTools, InferenceToolGroups.MediaTools)]
     [InlineData(ToolGroupSelection.IntegrationTools, InferenceToolGroups.IntegrationTools)]
     [InlineData(ToolGroupSelection.SocialTools, InferenceToolGroups.SocialTools)]
+    [InlineData(ToolGroupSelection.ShellTools, InferenceToolGroups.ShellTools)]
+    [InlineData(ToolGroupSelection.ScreenTools, InferenceToolGroups.ScreenTools)]
+    [InlineData(ToolGroupSelection.InputTools, InferenceToolGroups.InputTools)]
+    [InlineData(ToolGroupSelection.ClipboardTools, InferenceToolGroups.ClipboardTools)]
+    [InlineData(ToolGroupSelection.BrowserTools, InferenceToolGroups.BrowserTools)]
+    [InlineData(ToolGroupSelection.WindowTools, InferenceToolGroups.WindowTools)]
+    [InlineData(ToolGroupSelection.SystemTools, InferenceToolGroups.SystemTools)]
+    [InlineData(ToolGroupSelection.GitTools, InferenceToolGroups.GitTools)]
     public void ToProtoToolGroup_AllGroups_MapCorrectly(ToolGroupSelection input, InferenceToolGroups expected)
     {
         Assert.Equal(expected, EnumMapper.ToProtoToolGroup(input));

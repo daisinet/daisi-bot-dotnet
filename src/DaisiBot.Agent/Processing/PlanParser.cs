@@ -49,6 +49,55 @@ public static partial class PlanParser
         return plan.Steps.Count > 0 ? plan : null;
     }
 
+    /// <summary>
+    /// Fallback parser for when the model doesn't use XML tags.
+    /// Handles numbered lists like "1. Do this\n2. Do that" and bullet lists like "- Do this".
+    /// </summary>
+    public static ActionPlan? ParseFallback(string rawOutput, string goal)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+            return null;
+
+        var plan = new ActionPlan { Goal = goal };
+
+        var lines = rawOutput.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            if (plan.Steps.Count >= MaxSteps) break;
+
+            var match = NumberedListRegex().Match(line);
+            if (match.Success)
+            {
+                var desc = match.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    plan.Steps.Add(new ActionItem
+                    {
+                        StepNumber = plan.Steps.Count + 1,
+                        Description = desc
+                    });
+                }
+                continue;
+            }
+
+            var bulletMatch = BulletListRegex().Match(line);
+            if (bulletMatch.Success)
+            {
+                var desc = bulletMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    plan.Steps.Add(new ActionItem
+                    {
+                        StepNumber = plan.Steps.Count + 1,
+                        Description = desc
+                    });
+                }
+            }
+        }
+
+        return plan.Steps.Count > 0 ? plan : null;
+    }
+
     [GeneratedRegex(@"<plan>([\s\S]*?)</plan>", RegexOptions.Compiled)]
     private static partial Regex PlanTagRegex();
 
@@ -57,4 +106,10 @@ public static partial class PlanParser
 
     [GeneratedRegex(@"<step>([\s\S]*?)</step>", RegexOptions.Compiled)]
     private static partial Regex StepTagRegex();
+
+    [GeneratedRegex(@"^\d+[\.\)]\s*(.+)$", RegexOptions.Compiled)]
+    private static partial Regex NumberedListRegex();
+
+    [GeneratedRegex(@"^[-\*\u2022]\s*(.+)$", RegexOptions.Compiled)]
+    private static partial Regex BulletListRegex();
 }

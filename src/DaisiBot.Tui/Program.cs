@@ -15,12 +15,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+using LLama.Native;
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 // Suppress all console logging — we own the terminal
 builder.Logging.ClearProviders();
+
+// Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
+NativeLibraryConfig.All.WithLogCallback((level, message) => { });
 
 // Configure DAISI network
 DaisiStaticSettings.AutoswapOrc();
@@ -58,11 +62,25 @@ using (var scope = host.Services.CreateScope())
     var settingsService = scope.ServiceProvider.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
     var settings = await settingsService.GetSettingsAsync();
     DaisiStaticSettings.ApplyUserSettings(settings.OrcDomain, settings.OrcPort, settings.OrcUseSsl);
+#if DEBUG
+    if (settings.LocalhostModeEnabled)
+    {
+        DaisiStaticSettings.ApplyUserSettings("localhost", 5001, true);
+    }
+#endif
 }
 
 // Initialize auth
 var authService = host.Services.GetRequiredService<DaisiBotAuthService>();
 await authService.InitializeAsync();
+#if DEBUG
+{
+    var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
+    var s = await settingsSvc.GetSettingsAsync();
+    if (s.LocalhostModeEnabled)
+        authService.AppId = "app-debug";
+}
+#endif
 
 // Run TUI with raw console
 var app = new App(host.Services);
@@ -81,8 +99,8 @@ UserSettings userSettings;
     lastScreen = userSettings.LastScreen;
 }
 
-// Schedule model download check for first frame if host mode enabled
-if (userSettings.HostModeEnabled)
+// Schedule model download check for first frame if self-host mode enabled (not localhost or DaisiNet)
+if (userSettings.HostModeEnabled && !userSettings.LocalhostModeEnabled)
 {
     app.Post(() =>
     {

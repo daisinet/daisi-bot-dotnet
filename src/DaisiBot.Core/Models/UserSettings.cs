@@ -20,12 +20,17 @@ public class UserSettings
 
     // Host mode settings
     public bool HostModeEnabled { get; set; } = true;
+    public bool LocalhostModeEnabled { get; set; }
     public string ModelFolderPath { get; set; } = string.Empty;
     public int LlamaRuntime { get; set; }
     public uint ContextSize { get; set; } = 2048;
     public int GpuLayerCount { get; set; } = -1;
     public uint BatchSize { get; set; } = 512;
     public bool NetworkHostEnabled { get; set; }
+
+    // Logging
+    public bool BotFileLoggingEnabled { get; set; }
+    public bool LogInferenceOutputEnabled { get; set; }
 
     // UI state
     public string LastScreen { get; set; } = "bots";
