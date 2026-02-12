@@ -16,6 +16,7 @@ public class BotMainScreen : IScreen
     private readonly IBotEngine _botEngine;
     private readonly ISettingsService _settingsService;
     private readonly IAuthService _authService;
+    private readonly ISkillFileLoader _skillFileLoader;
     private readonly BotSidebarPanel _sidebar;
     private readonly BotOutputPanel _outputPanel;
     private readonly BotStatusPanel _statusPanel;
@@ -43,6 +44,7 @@ public class BotMainScreen : IScreen
         _botEngine = _services.GetRequiredService<IBotEngine>();
         _settingsService = _services.GetRequiredService<ISettingsService>();
         _authService = _services.GetRequiredService<IAuthService>();
+        _skillFileLoader = _services.GetRequiredService<ISkillFileLoader>();
 
         _sidebar = new BotSidebarPanel(app, _botStore) { IsScreenActive = () => IsActive };
         _outputPanel = new BotOutputPanel(app, _services);
@@ -103,6 +105,7 @@ public class BotMainScreen : IScreen
     }
 
     private bool IsActive => _app.ActiveScreen == this;
+    private bool CanDraw => IsActive && !_app.IsModalOpen;
 
     private void OnActionPlanChanged(object? sender, ActionPlanChangedEventArgs e)
     {
@@ -116,7 +119,7 @@ public class BotMainScreen : IScreen
                 _statusPanelVisible = true;
             }
 
-            if (IsActive)
+            if (CanDraw)
             {
                 Draw();
                 AnsiConsole.Flush();
@@ -156,6 +159,7 @@ public class BotMainScreen : IScreen
                         _commandDispatcher.CurrentBot = fresh;
                         _statusPanel.SetBot(fresh);
                         _outputPanel.SetBot(fresh);
+                        ResolveAndSetSkills(fresh);
                         Draw();
                         AnsiConsole.Flush();
                     });
@@ -170,14 +174,14 @@ public class BotMainScreen : IScreen
         {
             // Always update data so it's current when screen becomes active
             _sidebar.UpdateFlashingBots(bot);
-            _sidebar.LoadBots(skipDraw: !IsActive);
+            _sidebar.LoadBots(skipDraw: !CanDraw);
 
             if (_currentBot?.Id == bot.Id)
             {
                 _currentBot = bot;
                 _commandDispatcher.CurrentBot = bot;
                 _statusPanel.SetBot(bot);
-                if (IsActive)
+                if (CanDraw)
                 {
                     _outputPanel.UpdateStatus(bot);
                 }
@@ -195,11 +199,11 @@ public class BotMainScreen : IScreen
                         BotId = bot.Id,
                         Level = BotLogLevel.UserPrompt,
                         Message = bot.PendingQuestion
-                    }, skipDraw: !IsActive);
+                    }, skipDraw: !CanDraw);
                 }
             }
 
-            if (IsActive) AnsiConsole.Flush();
+            if (CanDraw) AnsiConsole.Flush();
         });
     }
 
@@ -208,8 +212,8 @@ public class BotMainScreen : IScreen
         _app.Post(() =>
         {
             if (_currentBot?.Id != entry.BotId) return;
-            _outputPanel.AppendLogEntry(entry, skipDraw: !IsActive);
-            if (IsActive) AnsiConsole.Flush();
+            _outputPanel.AppendLogEntry(entry, skipDraw: !CanDraw);
+            if (CanDraw) AnsiConsole.Flush();
         });
     }
 
@@ -347,8 +351,38 @@ public class BotMainScreen : IScreen
         _statusPanel.SetBot(bot);
         _statusPanel.SetPlan(null);
         _outputPanel.SetBot(bot);
+        ResolveAndSetSkills(bot);
         Draw();
         AnsiConsole.Flush();
+    }
+
+    private void ResolveAndSetSkills(BotInstance bot)
+    {
+        Task.Run(async () =>
+        {
+            var allSkills = await _skillFileLoader.LoadAllAsync();
+            var enabledIds = bot.GetEnabledSkillIds();
+
+            List<string> names;
+            if (enabledIds.Count == 0)
+            {
+                // No explicit filter — bot has access to all available skills
+                names = allSkills.Select(s => s.Name).OrderBy(n => n).ToList();
+            }
+            else
+            {
+                var lookup = allSkills.ToDictionary(s => s.Id, s => s.Name, StringComparer.OrdinalIgnoreCase);
+                names = enabledIds
+                    .Select(id => lookup.TryGetValue(id, out var name) ? name : id)
+                    .ToList();
+            }
+
+            _app.Post(() =>
+            {
+                _statusPanel.SetSkills(names);
+                if (IsActive) { Draw(); AnsiConsole.Flush(); }
+            });
+        });
     }
 
     private void OnNewBot()
@@ -361,6 +395,7 @@ public class BotMainScreen : IScreen
             _statusPanel.SetBot(bot);
             _statusPanel.SetPlan(null);
             _outputPanel.SetBot(bot);
+            ResolveAndSetSkills(bot);
             _focus = FocusTarget.Output;
             UpdateFocus();
             Draw();
@@ -381,6 +416,7 @@ public class BotMainScreen : IScreen
                 _commandDispatcher.CurrentBot = null;
                 _statusPanel.SetBot(null);
                 _statusPanel.SetPlan(null);
+                _statusPanel.SetSkills([]);
                 Task.Run(async () =>
                 {
                     var engine = _services.GetRequiredService<IBotEngine>();
@@ -417,6 +453,7 @@ public class BotMainScreen : IScreen
         _commandDispatcher.CurrentBot = null;
         _statusPanel.SetBot(null);
         _statusPanel.SetPlan(null);
+        _statusPanel.SetSkills([]);
         _outputPanel.ClearBot();
         _sidebar.LoadBots(onLoaded: () =>
         {

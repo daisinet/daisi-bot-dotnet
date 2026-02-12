@@ -175,6 +175,8 @@ public class BotOutputPanel
         var prefix = entry.Level switch
         {
             BotLogLevel.Info => "[Bot]",
+            BotLogLevel.Debug => "[Debug]",
+            BotLogLevel.RunStart => "",
             BotLogLevel.StepStart => $"[Step{stepLabel}] \u25B6",
             BotLogLevel.StepComplete => $"[Step{stepLabel}] \u2713",
             BotLogLevel.Warning => "[Warn] \u26A0",
@@ -190,6 +192,34 @@ public class BotOutputPanel
 
         var level = entry.Level;
         var isResult = level == BotLogLevel.StepComplete;
+        var isRunStart = level == BotLogLevel.RunStart;
+
+        // RunStart: green bordered banner
+        if (isRunStart)
+        {
+            var bannerText = $" {Sanitize(entry.Message)} ";
+            var innerWidth = maxWidth - 2;
+            if (bannerText.Length > innerWidth) bannerText = bannerText[..innerWidth];
+            var padLeft = (innerWidth - bannerText.Length) / 2;
+            var padRight = innerWidth - bannerText.Length - padLeft;
+
+            _displayLines.Add("\u250C" + new string('\u2500', innerWidth) + "\u2510");
+            _isBoxBorder.Add(true);
+            _lineLevel.Add(level);
+
+            _displayLines.Add("\u2502" + new string(' ', padLeft) + bannerText + new string(' ', padRight) + "\u2502");
+            _isBoxBorder.Add(false);
+            _lineLevel.Add(level);
+
+            _displayLines.Add("\u2514" + new string('\u2500', innerWidth) + "\u2518");
+            _isBoxBorder.Add(true);
+            _lineLevel.Add(level);
+
+            _displayLines.Add("");
+            _isBoxBorder.Add(false);
+            _lineLevel.Add(BotLogLevel.Info);
+            return;
+        }
 
         if (isResult)
         {
@@ -288,7 +318,7 @@ public class BotOutputPanel
         AnsiConsole.WriteAt(bottomRow, Left + Width - 1, "\u2518");
         ResetBorderColor();
 
-        var hints = " Enter:Send  /:Commands  Esc:Stop ";
+        var hints = " Enter:Send  /:Commands  \u2191\u2193:Scroll  Esc:Stop ";
         if (hints.Length <= contentWidth)
         {
             var hintStart = Left + (Width - hints.Length) / 2;
@@ -318,9 +348,20 @@ public class BotOutputPanel
         var innerWidth = Width - 2;
         var textWidth = innerWidth - LeftPadding;
         var areaHeight = OutputAreaHeight;
+        var maxScroll = Math.Max(0, _displayLines.Count - areaHeight);
 
-        if (_scrollOffset > Math.Max(0, _displayLines.Count - areaHeight))
-            _scrollOffset = Math.Max(0, _displayLines.Count - areaHeight);
+        if (_scrollOffset > maxScroll)
+            _scrollOffset = maxScroll;
+
+        // Compute scrollbar thumb position
+        var totalLines = _displayLines.Count;
+        var thumbRow = -1;
+        if (totalLines > areaHeight && areaHeight > 2)
+        {
+            thumbRow = maxScroll > 0
+                ? (int)((long)_scrollOffset * (areaHeight - 1) / maxScroll)
+                : 0;
+        }
 
         for (var i = 0; i < areaHeight; i++)
         {
@@ -353,9 +394,19 @@ public class BotOutputPanel
                 AnsiConsole.WriteAt(row, Left + 1, new string(' ', innerWidth));
             }
 
-            SetBorderColor();
-            AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502");
-            ResetBorderColor();
+            // Right border: scrollbar thumb or normal border
+            if (i == thumbRow)
+            {
+                AnsiConsole.SetForeground(ConsoleColor.White);
+                AnsiConsole.WriteAt(row, Left + Width - 1, "\u2588"); // █
+                AnsiConsole.ResetStyle();
+            }
+            else
+            {
+                SetBorderColor();
+                AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502");
+                ResetBorderColor();
+            }
         }
     }
 
@@ -419,6 +470,13 @@ public class BotOutputPanel
         {
             case BotLogLevel.Info:
                 AnsiConsole.SetForeground(ConsoleColor.Green);
+                break;
+            case BotLogLevel.Debug:
+                AnsiConsole.SetForeground(ConsoleColor.DarkGray);
+                break;
+            case BotLogLevel.RunStart:
+                AnsiConsole.SetForeground(ConsoleColor.Green);
+                AnsiConsole.SetBold();
                 break;
             case BotLogLevel.StepStart:
                 AnsiConsole.SetForeground(ConsoleColor.Magenta);
@@ -532,7 +590,25 @@ public class BotOutputPanel
 
             case ConsoleKey.End:
                 _cursorPos = _inputBuffer.Length;
+                ScrollToEnd();
+                DrawOutput();
                 DrawInputLine();
+                return true;
+
+            case ConsoleKey.UpArrow:
+                if (_scrollOffset > 0)
+                {
+                    _scrollOffset--;
+                    DrawOutput();
+                }
+                return true;
+
+            case ConsoleKey.DownArrow:
+                if (_scrollOffset < Math.Max(0, _displayLines.Count - OutputAreaHeight))
+                {
+                    _scrollOffset++;
+                    DrawOutput();
+                }
                 return true;
 
             case ConsoleKey.PageUp:

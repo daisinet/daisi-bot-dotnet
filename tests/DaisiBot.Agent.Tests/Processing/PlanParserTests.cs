@@ -311,4 +311,125 @@ public class PlanParserTests
         Assert.Null(result.Steps[0].Result);
         Assert.Null(result.Steps[0].Error);
     }
+
+    // --- Fallback parser tests ---
+
+    [Fact]
+    public void ParseFallback_NumberedList_ReturnsPlan()
+    {
+        var input = """
+            1. Search for the latest news
+            2. Summarize the results
+            3. Format the output
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Get the news");
+
+        Assert.NotNull(result);
+        Assert.Equal("Get the news", result.Goal);
+        Assert.Equal(3, result.Steps.Count);
+        Assert.Equal("Search for the latest news", result.Steps[0].Description);
+        Assert.Equal("Summarize the results", result.Steps[1].Description);
+        Assert.Equal("Format the output", result.Steps[2].Description);
+    }
+
+    [Fact]
+    public void ParseFallback_NumberedListWithParens_ReturnsPlan()
+    {
+        var input = """
+            1) First step
+            2) Second step
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Do task");
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Steps.Count);
+        Assert.Equal("First step", result.Steps[0].Description);
+    }
+
+    [Fact]
+    public void ParseFallback_BulletList_ReturnsPlan()
+    {
+        var input = """
+            - Search the web
+            - Extract data
+            - Save results
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Research task");
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.Steps.Count);
+        Assert.Equal("Search the web", result.Steps[0].Description);
+    }
+
+    [Fact]
+    public void ParseFallback_MixedWithProse_ExtractsSteps()
+    {
+        var input = """
+            Here's my plan to accomplish the goal:
+
+            1. Search for weather data
+            2. Parse the results
+            3. Generate a report
+
+            This should cover everything needed.
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Weather report");
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.Steps.Count);
+    }
+
+    [Fact]
+    public void ParseFallback_MoreThanFive_CapsAtFive()
+    {
+        var input = """
+            1. Step one
+            2. Step two
+            3. Step three
+            4. Step four
+            5. Step five
+            6. Step six
+            7. Step seven
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Big task");
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Steps.Count);
+    }
+
+    [Fact]
+    public void ParseFallback_EmptyInput_ReturnsNull()
+    {
+        Assert.Null(PlanParser.ParseFallback("", "goal"));
+    }
+
+    [Fact]
+    public void ParseFallback_NoListItems_ReturnsNull()
+    {
+        var input = "I'm not sure how to plan this. Let me think about it.";
+
+        Assert.Null(PlanParser.ParseFallback(input, "goal"));
+    }
+
+    [Fact]
+    public void ParseFallback_StepNumbersAreSequential()
+    {
+        var input = """
+            1. Alpha
+            2. Beta
+            3. Gamma
+            """;
+
+        var result = PlanParser.ParseFallback(input, "Test");
+
+        Assert.NotNull(result);
+        Assert.Equal(1, result.Steps[0].StepNumber);
+        Assert.Equal(2, result.Steps[1].StepNumber);
+        Assert.Equal(3, result.Steps[2].StepNumber);
+    }
 }

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(cd:*)",
+      "Bash(git -C \"C:\\\\repos\\\\daisinet\\\\daisi-bot-dotnet\" add src/DaisiBot.Maui/wwwroot/index.html src/DaisiBot.Shared.UI/Components/Bots/BotDetailPanel.razor src/DaisiBot.Shared.UI/_Imports.razor)",
+      "Bash(git -C \"C:\\\\repos\\\\daisinet\\\\daisi-bot-dotnet\" commit -m \"$\\(cat <<''EOF''\nAdd auto-scroll to bot output panel\n\nScrolls the log container to the bottom when entries are loaded or\nupdated so the latest output is always visible.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C \"C:\\\\repos\\\\daisinet\\\\daisi-bot-dotnet\" push)",
+      "Bash(git -C \"C:\\\\repos\\\\daisinet\\\\daisi-sdk-dotnet\" push)"
+    ]
+  }
+}

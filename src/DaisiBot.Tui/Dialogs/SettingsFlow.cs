@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DaisiBot.Tui.Dialogs;
 
 /// <summary>
-/// Multi-page settings editor. Pages: Inference, Connection, System Prompt, Tools.
+/// Multi-page settings editor. Pages: General, Inference, Connection, System Prompt, Tools.
 /// Left/Right arrows switch pages, Up/Down navigate fields, Enter edits.
 /// </summary>
 public class SettingsFlow : IModal
@@ -23,8 +23,8 @@ public class SettingsFlow : IModal
     private string _originalOrcDomain = "";
     private int _originalOrcPort;
 
-    private enum Page { Inference, Connection, Prompt, Tools }
-    private Page _currentPage = Page.Inference;
+    private enum Page { General, Inference, Connection, Prompt, Tools }
+    private Page _currentPage = Page.General;
     private int _fieldIndex;
 
     // Inference page fields
@@ -40,6 +40,10 @@ public class SettingsFlow : IModal
     // System Prompt
     private readonly StringBuilder _systemPromptField = new();
 
+    // General
+    private bool _fileLoggingEnabled;
+    private bool _logInferenceOutput;
+
     // Tools
     private readonly bool[] _toolChecks;
     private readonly ToolGroupSelection[] _allGroups;
@@ -50,7 +54,7 @@ public class SettingsFlow : IModal
     private string _statusText = "";
     private ConsoleColor _statusColor = ConsoleColor.Gray;
 
-    private static readonly string[] PageNames = ["Inference", "Connection", "Prompt", "Tools"];
+    private static readonly string[] PageNames = ["General", "Inference", "Connection", "Prompt", "Tools"];
 
     public SettingsFlow(App app, IServiceProvider services)
     {
@@ -85,6 +89,8 @@ public class SettingsFlow : IModal
                     var enabled = settings.GetEnabledToolGroups();
                     for (var i = 0; i < _allGroups.Length; i++)
                         _toolChecks[i] = enabled.Contains(_allGroups[i]);
+                    _fileLoggingEnabled = settings.BotFileLoggingEnabled;
+                    _logInferenceOutput = settings.LogInferenceOutputEnabled;
 
                     _loaded = true;
                     Draw();
@@ -136,6 +142,9 @@ public class SettingsFlow : IModal
         // Draw current page
         switch (_currentPage)
         {
+            case Page.General:
+                DrawGeneralPage(contentTop);
+                break;
             case Page.Inference:
                 DrawInferencePage(contentTop);
                 break;
@@ -154,6 +163,31 @@ public class SettingsFlow : IModal
             DialogRunner.DrawStatus(_box, _statusText, _statusColor);
 
         DialogRunner.DrawButtonHints(_box, " \u2190\u2192:Page  \u2191\u2193:Field  Enter:Edit  S:Save  Esc:Cancel ");
+    }
+
+    private void DrawGeneralPage(int top)
+    {
+        AnsiConsole.WriteAt(top, _box!.InnerLeft, "Logging:");
+
+        DrawCheckboxRow(top + 1, 0, "Log bot runs to file (daisi-bot-logs/)", _fileLoggingEnabled);
+        DrawCheckboxRow(top + 2, 1, "Log inference output", _logInferenceOutput);
+    }
+
+    private void DrawCheckboxRow(int row, int fieldIdx, string label, bool value)
+    {
+        var check = value ? "[x]" : "[ ]";
+        var text = $" {check} {label}";
+
+        if (_fieldIndex == fieldIdx)
+        {
+            AnsiConsole.SetReverse();
+            AnsiConsole.WriteAt(row, _box!.InnerLeft, text.PadRight(_box.InnerWidth));
+            AnsiConsole.ResetStyle();
+        }
+        else
+        {
+            AnsiConsole.WriteAt(row, _box!.InnerLeft, text.PadRight(_box.InnerWidth));
+        }
     }
 
     private void DrawInferencePage(int top)
@@ -231,6 +265,7 @@ public class SettingsFlow : IModal
                 AnsiConsole.ResetStyle();
             }
         }
+
     }
 
     private void DrawFieldRow(int top, int rowOffset, string label, string value, bool focused)
@@ -285,7 +320,7 @@ public class SettingsFlow : IModal
                 break;
 
             case ConsoleKey.LeftArrow:
-                if (_currentPage > Page.Inference)
+                if (_currentPage > Page.General)
                 {
                     _currentPage--;
                     _fieldIndex = 0;
@@ -397,6 +432,11 @@ public class SettingsFlow : IModal
     {
         switch (_currentPage)
         {
+            case Page.General:
+                if (_fieldIndex == 0) _fileLoggingEnabled = !_fileLoggingEnabled;
+                if (_fieldIndex == 1) _logInferenceOutput = !_logInferenceOutput;
+                break;
+
             case Page.Inference:
             case Page.Connection when _fieldIndex < 2:
             case Page.Prompt:
@@ -460,6 +500,7 @@ public class SettingsFlow : IModal
     {
         var max = _currentPage switch
         {
+            Page.General => 1,
             Page.Inference => 2,
             Page.Connection => 2,
             Page.Prompt => 0,
@@ -491,6 +532,8 @@ public class SettingsFlow : IModal
                 enabledGroups.Add(_allGroups[i]);
         }
         _settings.SetEnabledToolGroups(enabledGroups);
+        _settings.BotFileLoggingEnabled = _fileLoggingEnabled;
+        _settings.LogInferenceOutputEnabled = _logInferenceOutput;
 
         _saving = true;
         _statusText = "Saving...";

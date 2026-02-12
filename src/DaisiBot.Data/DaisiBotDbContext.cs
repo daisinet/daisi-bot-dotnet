@@ -123,6 +123,8 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
             ("LastScreen", "ALTER TABLE Settings ADD COLUMN LastScreen TEXT NOT NULL DEFAULT 'bots'"),
             ("StatusPanelVisible", "ALTER TABLE Settings ADD COLUMN StatusPanelVisible INTEGER NOT NULL DEFAULT 1"),
             ("LocalhostModeEnabled", "ALTER TABLE Settings ADD COLUMN LocalhostModeEnabled INTEGER NOT NULL DEFAULT 0"),
+            ("BotFileLoggingEnabled", "ALTER TABLE Settings ADD COLUMN BotFileLoggingEnabled INTEGER NOT NULL DEFAULT 0"),
+            ("LogInferenceOutputEnabled", "ALTER TABLE Settings ADD COLUMN LogInferenceOutputEnabled INTEGER NOT NULL DEFAULT 0"),
         ];
 
         foreach (var (name, sql) in migrations)

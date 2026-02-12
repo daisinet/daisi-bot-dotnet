@@ -28,6 +28,10 @@ public class UserSettings
     public uint BatchSize { get; set; } = 512;
     public bool NetworkHostEnabled { get; set; }
 
+    // Logging
+    public bool BotFileLoggingEnabled { get; set; }
+    public bool LogInferenceOutputEnabled { get; set; }
+
     // UI state
     public string LastScreen { get; set; } = "bots";
     public bool StatusPanelVisible { get; set; } = true;
