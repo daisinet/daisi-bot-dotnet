@@ -37,6 +37,8 @@ public class SlashCommandDispatcher
         _handlers["login"] = new LoginCommandHandler(app, services).HandleAsync;
         _handlers["balance"] = new BalanceCommandHandler(app, services).HandleAsync;
         _handlers["clear"] = new ClearCommandHandler().HandleAsync;
+        _handlers["log-to-file"] = new LogToFileCommandHandler(services).HandleAsync;
+        _handlers["log-inference"] = new LogInferenceCommandHandler(services).HandleAsync;
         _handlers["export"] = new ExportCommandHandler(services, context).HandleAsync;
         _handlers["status"] = new StatusCommandHandler(services, this).HandleAsync;
         _handlers["runnow"] = new RunNowCommandHandler(services, this).HandleAsync;

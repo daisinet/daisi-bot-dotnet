@@ -32,6 +32,14 @@ public static class EnumMapper
         ToolGroupSelection.MediaTools => InferenceToolGroups.MediaTools,
         ToolGroupSelection.IntegrationTools => InferenceToolGroups.IntegrationTools,
         ToolGroupSelection.SocialTools => InferenceToolGroups.SocialTools,
+        ToolGroupSelection.ShellTools => InferenceToolGroups.ShellTools,
+        ToolGroupSelection.ScreenTools => InferenceToolGroups.ScreenTools,
+        ToolGroupSelection.InputTools => InferenceToolGroups.InputTools,
+        ToolGroupSelection.ClipboardTools => InferenceToolGroups.ClipboardTools,
+        ToolGroupSelection.BrowserTools => InferenceToolGroups.BrowserTools,
+        ToolGroupSelection.WindowTools => InferenceToolGroups.WindowTools,
+        ToolGroupSelection.SystemTools => InferenceToolGroups.SystemTools,
+        ToolGroupSelection.GitTools => InferenceToolGroups.GitTools,
         _ => InferenceToolGroups.InformationTools
     };
 

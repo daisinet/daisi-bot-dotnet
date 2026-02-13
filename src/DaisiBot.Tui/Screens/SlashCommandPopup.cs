@@ -21,12 +21,14 @@ public class SlashCommandPopup
         new("kill",     "Stop & delete bot",    9),
         new("runnow",   "Run bot now",          10),
         new("clear",    "Clear output",         11),
-        new("model",    "Pick model",           12),
-        new("settings", "Open settings",        13),
-        new("skills",   "Browse skills",        14),
-        new("export",   "Export data",          15),
-        new("install",  "Install skill",        16, RequiresArgs: true),
-        new("login",    "Login flow",           17),
+        new("log-to-file",  "File logging on/off",  12, RequiresArgs: true),
+        new("log-inference","Inference log on/off",  13, RequiresArgs: true),
+        new("model",    "Pick model",           14),
+        new("settings", "Open settings",        15),
+        new("skills",   "Browse skills",        16),
+        new("export",   "Export data",          17),
+        new("install",  "Install skill",        18, RequiresArgs: true),
+        new("login",    "Login flow",           19),
     ];
 
     private const int MaxVisible = 5;

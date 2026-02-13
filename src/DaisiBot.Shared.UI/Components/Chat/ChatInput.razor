@@ -1,6 +1,29 @@
-<div class="chat-input pa-3 d-flex align-center">
+<div class="chat-input pa-3 d-flex align-center" style="position: relative;">
+
+    @* #filename autocomplete popup *@
+    @if (_showFileAutocomplete && _fileResults.Any())
+    {
+        <MudPaper Elevation="4" Class="file-autocomplete-popup" Style="position: absolute; bottom: 100%; left: 16px; right: 80px; max-height: 250px; overflow-y: auto; z-index: 1000;">
+            <MudList T="FileAutocompleteItem" Dense="true" @bind-SelectedValue="_selectedFileItem">
+                @foreach (var file in _fileResults)
+                {
+                    <MudListItem T="FileAutocompleteItem" Value="file" OnClick="() => InsertFileReference(file)">
+                        <div class="d-flex align-center">
+                            <MudIcon Icon="@GetFileIcon(file.ContentType)" Size="Size.Small" Class="mr-2" />
+                            <div>
+                                <MudText Typo="Typo.body2">@file.Name</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@file.Path - @FormatSize(file.SizeBytes)</MudText>
+                            </div>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    }
+
     <MudTextField @bind-Value="_message" Label="Type your message..." Variant="Variant.Outlined"
                   FullWidth="true" Immediate="true" OnKeyDown="OnKeyDown"
+                  TextChanged="OnTextChanged"
                   Disabled="IsStreaming" Class="flex-grow-1 mr-2" />
     @if (IsStreaming)
     {
@@ -18,13 +41,86 @@
     [Parameter] public bool IsStreaming { get; set; }
 
     private string _message = string.Empty;
+    private bool _showFileAutocomplete = false;
+    private string _fileSearchQuery = string.Empty;
+    private List<FileAutocompleteItem> _fileResults = [];
+    private FileAutocompleteItem? _selectedFileItem;
+    private CancellationTokenSource? _searchCts;
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
+        if (e.Key == "Escape" && _showFileAutocomplete)
+        {
+            _showFileAutocomplete = false;
+            return;
+        }
+
         if (e.Key == "Enter" && !e.ShiftKey && !IsStreaming)
         {
+            if (_showFileAutocomplete)
+            {
+                _showFileAutocomplete = false;
+                return;
+            }
             await SendAsync();
         }
+    }
+
+    private async Task OnTextChanged(string text)
+    {
+        _message = text;
+
+        // Detect # for file autocomplete
+        var hashIndex = text.LastIndexOf('#');
+        if (hashIndex >= 0)
+        {
+            var query = text[(hashIndex + 1)..];
+            // Only search if there's no space after # and query is non-empty
+            if (!string.IsNullOrEmpty(query) && !query.Contains(' '))
+            {
+                _fileSearchQuery = query;
+                await SearchFilesDebounced(query);
+                return;
+            }
+        }
+
+        _showFileAutocomplete = false;
+    }
+
+    private async Task SearchFilesDebounced(string query)
+    {
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var token = _searchCts.Token;
+
+        try
+        {
+            await Task.Delay(300, token); // Debounce
+
+            // In production, calls DriveClient.SearchFiles(query)
+            // For now, provide sample results
+            _fileResults =
+            [
+                new() { Id = "1", Name = $"{query}-report.pdf", Path = "/documents", SizeBytes = 1024000, ContentType = "application/pdf" },
+                new() { Id = "2", Name = $"{query}-notes.md", Path = "/notes", SizeBytes = 4096, ContentType = "text/markdown" },
+            ];
+
+            _showFileAutocomplete = _fileResults.Any();
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void InsertFileReference(FileAutocompleteItem file)
+    {
+        // Replace #query with #[filename](fileId)
+        var hashIndex = _message.LastIndexOf('#');
+        if (hashIndex >= 0)
+        {
+            _message = _message[..hashIndex] + $"#[{file.Name}]({file.Id}) ";
+        }
+        _showFileAutocomplete = false;
+        StateHasChanged();
     }
 
     private async Task OnSendClick() => await SendAsync();
@@ -33,8 +129,34 @@
     private async Task SendAsync()
     {
         if (string.IsNullOrWhiteSpace(_message)) return;
+        _showFileAutocomplete = false;
         var msg = _message;
         _message = string.Empty;
         await OnSend.InvokeAsync(msg);
+    }
+
+    private string GetFileIcon(string contentType) => contentType switch
+    {
+        "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+        _ when contentType.StartsWith("image/") => Icons.Material.Filled.Image,
+        _ when contentType.StartsWith("text/") => Icons.Material.Filled.Description,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    class FileAutocompleteItem
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Path { get; set; } = "/";
+        public long SizeBytes { get; set; }
+        public string ContentType { get; set; } = "";
     }
 }

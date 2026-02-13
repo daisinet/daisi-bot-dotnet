@@ -46,6 +46,7 @@ public class LocalInferenceService : ILocalInferenceService
             await _settingsService.LoadAsync();
             await SyncUserModelPathAsync();
             _toolService.LoadTools();
+            _toolService.LoadToolsFromAssembly(typeof(DaisiBot.LocalTools.Shell.ShellExecuteTool).Assembly);
             _modelService.LoadModels();
             _initialized = true;
             _logger.LogInformation("Local inference initialized. Models loaded: {Count}", _modelService.LocalModels.Count);

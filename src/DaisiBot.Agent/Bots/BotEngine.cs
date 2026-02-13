@@ -21,6 +21,7 @@ public class BotEngine : IBotEngine, IDisposable
     private readonly IBotStore _botStore;
     private readonly ISettingsService _settingsService;
     private readonly ISkillService _skillService;
+    private readonly ISkillFileLoader _skillFileLoader;
     private readonly DaisiBotClientKeyProvider _keyProvider;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<BotEngine> _logger;
@@ -29,17 +30,20 @@ public class BotEngine : IBotEngine, IDisposable
 
     public event EventHandler<BotInstance>? BotStatusChanged;
     public event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
+    public event EventHandler<BotLogEntry>? BotLogEntryAdded;
 
     public BotEngine(
         IBotStore botStore,
         ISettingsService settingsService,
         ISkillService skillService,
+        ISkillFileLoader skillFileLoader,
         DaisiBotClientKeyProvider keyProvider,
         ILoggerFactory loggerFactory)
     {
         _botStore = botStore;
         _settingsService = settingsService;
         _skillService = skillService;
+        _skillFileLoader = skillFileLoader;
         _keyProvider = keyProvider;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<BotEngine>();
@@ -70,6 +74,22 @@ public class BotEngine : IBotEngine, IDisposable
         BotStatusChanged?.Invoke(this, bot);
 
         runtime.ExecutionTask = Task.Run(() => ExecuteBotLoopAsync(botId, runtime, cts.Token));
+    }
+
+    public async Task StopAllBotsAsync()
+    {
+        var runningIds = _runtimes.Keys.ToList();
+        foreach (var id in runningIds)
+            await StopBotAsync(id);
+    }
+
+    public async Task RestartAllBotsAsync()
+    {
+        var runningIds = _runtimes.Keys.ToList();
+        foreach (var id in runningIds)
+            await StopBotAsync(id);
+        foreach (var id in runningIds)
+            await StartBotAsync(id);
     }
 
     public async Task StopBotAsync(Guid botId)
@@ -182,7 +202,39 @@ public class BotEngine : IBotEngine, IDisposable
         bot.LastRunAt = DateTime.UtcNow;
         await _botStore.UpdateAsync(bot);
 
-        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Starting bot: {bot.Label}");
+        var settings = await _settingsService.GetSettingsAsync();
+
+        // Load memories for this bot
+        List<BotMemoryEntry> memories = [];
+        if (bot.MemoryEnabled)
+            memories = await _botStore.GetMemoriesAsync(botId, bot.MaxMemoryEntries);
+
+        // Open log file for this run if file logging is enabled
+        if (settings.BotFileLoggingEnabled)
+        {
+            try
+            {
+                var logDir = Path.Combine(AppContext.BaseDirectory, "daisi-bot-logs");
+                Directory.CreateDirectory(logDir);
+                var safeLabel = SanitizeFileName(bot.Label);
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"{safeLabel}_run{bot.ExecutionCount}_{timestamp}.log";
+                var writer = new StreamWriter(Path.Combine(logDir, fileName), append: false, System.Text.Encoding.UTF8);
+                runtime.LogFileWriter = writer;
+                WriteLogFileHeader(writer, bot, settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create log file for bot {BotId}", botId);
+            }
+        }
+
+        try
+        {
+
+        var runTime = DateTime.Now.ToString("h:mmtt").ToLower();
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.RunStart,
+            $"Executing Run #{bot.ExecutionCount} at {runTime}");
         await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info, $"Goal: {bot.Goal}");
 
         if (userInstructions.Count > 0)
@@ -195,7 +247,39 @@ public class BotEngine : IBotEngine, IDisposable
 
         // Step 1: Skill assessment
         await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Assessing required skills...");
-        var settings = await _settingsService.GetSettingsAsync();
+
+        // Resolve skills
+        var allSkills = await _skillFileLoader.LoadAllAsync(ct);
+        var enabledSkillIds = bot.GetEnabledSkillIds();
+        var activeSkills = enabledSkillIds.Count > 0
+            ? allSkills.Where(s => enabledSkillIds.Contains(s.Id, StringComparer.OrdinalIgnoreCase)).ToList()
+            : allSkills;
+
+        var skillNames = activeSkills.Select(s => s.Name).OrderBy(n => n).ToList();
+        var toolGroups = settings.GetEnabledToolGroups();
+
+        var assessmentDetail = new StringBuilder();
+        if (skillNames.Count > 0)
+        {
+            assessmentDetail.AppendLine($"Skills ({skillNames.Count}): {string.Join(", ", skillNames)}");
+        }
+        else
+        {
+            assessmentDetail.AppendLine("Skills: none");
+        }
+
+        if (toolGroups.Count > 0)
+        {
+            assessmentDetail.AppendLine($"Tool groups ({toolGroups.Count}): {string.Join(", ", toolGroups)}");
+        }
+        else
+        {
+            assessmentDetail.AppendLine("Tool groups: none");
+        }
+
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
+            $"Skill assessment complete — {skillNames.Count} skills, {toolGroups.Count} tool groups",
+            assessmentDetail.ToString().TrimEnd());
 
         // Step 2: Plan — check for persisted steps first
         await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Creating execution plan...");
@@ -217,36 +301,32 @@ public class BotEngine : IBotEngine, IDisposable
                 $"Using {persistedSteps.Count} user-defined steps");
         }
 
-        var inferenceClient = CreateInferenceClient();
-        try
+        var plan = prebuiltPlan ?? await CreatePlanAsync(bot, settings, userInstructions, memories, ct);
+        if (plan is null)
         {
-            var plan = prebuiltPlan ?? await CreatePlanAsync(inferenceClient, bot, settings, userInstructions, ct);
-            if (plan is null)
-            {
-                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning, "Could not create plan, executing goal directly");
-                await ExecuteDirectAsync(inferenceClient, bot, settings, userInstructions, ct);
-            }
-            else
-            {
-                if (prebuiltPlan is null)
-                {
-                    await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
-                        $"Plan created: {plan.Goal} ({plan.Steps.Count} steps)");
-                }
+            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning, "Could not create plan, executing goal directly");
+            var directResult = await ExecuteDirectAsync(bot, settings, userInstructions, memories, ct);
 
-                FireActionPlanChanged(botId, plan);
-
-                // Step 3: Execute plan steps
-                await ExecutePlanStepsAsync(inferenceClient, bot, plan, settings, userInstructions, ct);
-
-                // Step 4: Synthesize
-                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepStart, "Synthesizing results...");
-                // Synthesis is done within ExecutePlanStepsAsync
-            }
+            // Extract memories after direct execution
+            if (bot.MemoryEnabled && !string.IsNullOrWhiteSpace(directResult))
+                await ExtractAndStoreMemoriesAsync(bot, settings, directResult, ct);
         }
-        finally
+        else
         {
-            try { await inferenceClient.CloseAsync(); } catch { }
+            if (prebuiltPlan is null)
+            {
+                await LogAsync(botId, bot.ExecutionCount, BotLogLevel.StepComplete,
+                    $"Plan created: {plan.Goal} ({plan.Steps.Count} steps)");
+            }
+
+            FireActionPlanChanged(botId, plan);
+
+            // Step 3: Execute plan steps + synthesize
+            var synthesisResult = await ExecutePlanStepsAsync(bot, plan, settings, userInstructions, memories, ct);
+
+            // Extract memories after synthesis
+            if (bot.MemoryEnabled && !string.IsNullOrWhiteSpace(synthesisResult))
+                await ExtractAndStoreMemoriesAsync(bot, settings, synthesisResult, ct);
         }
 
         // Reschedule
@@ -272,189 +352,481 @@ public class BotEngine : IBotEngine, IDisposable
             $"Execution complete. Status: {bot.Status}");
 
         BotStatusChanged?.Invoke(this, bot);
+
+        } // end try
+        finally
+        {
+            // Close log file for this run
+            if (runtime.LogFileWriter is { } logWriter)
+            {
+                try
+                {
+                    logWriter.WriteLine();
+                    logWriter.WriteLine(new string('\u2550', 60));
+                    logWriter.WriteLine($"Log closed at {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    logWriter.Flush();
+                    logWriter.Dispose();
+                }
+                catch { }
+                runtime.LogFileWriter = null;
+            }
+        }
     }
 
     private async Task<ActionPlan?> CreatePlanAsync(
-        InferenceClient client, BotInstance bot, UserSettings settings,
-        List<string> userInstructions, CancellationToken ct)
+        BotInstance bot, UserSettings settings,
+        List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
     {
-        var planRequest = new CreateInferenceRequest
+        const int maxAttempts = 3;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            ModelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName,
-            InitializationPrompt = BuildBotPlanningPrompt(bot, userInstructions),
-            ThinkLevel = ThinkLevels.Basic
-        };
-
-        try
-        {
-            await client.CreateAsync(planRequest);
-
-            var sendRequest = SendInferenceRequest.CreateDefault();
-            sendRequest.Text = bot.Goal;
-            sendRequest.Temperature = 0.3f;
-            sendRequest.MaxTokens = 1024;
-            sendRequest.ThinkLevel = ThinkLevels.Basic;
-
-            var content = new StringBuilder();
-            var stream = client.Send(sendRequest);
-            while (await stream.ResponseStream.MoveNext(ct))
-            {
-                content.Append(stream.ResponseStream.Current.Content);
-            }
-
-            try { await client.CloseAsync(closeOrcSession: false); } catch { }
-            return PlanParser.Parse(content.ToString());
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Planning failed for bot {BotId}", bot.Id);
-            try { await client.CloseAsync(closeOrcSession: false); } catch { }
-            return null;
-        }
-    }
-
-    private async Task ExecutePlanStepsAsync(
-        InferenceClient client, BotInstance bot, ActionPlan plan,
-        UserSettings settings, List<string> userInstructions, CancellationToken ct)
-    {
-        var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
-
-        // Create execution session
-        var execRequest = new CreateInferenceRequest
-        {
-            ModelName = modelName,
-            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
-            ThinkLevel = ThinkLevels.BasicWithTools
-        };
-        foreach (var group in settings.GetEnabledToolGroups())
-            execRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(group));
-
-        await client.CreateAsync(execRequest);
-
-        var stepResults = new List<string>();
-        foreach (var step in plan.Steps)
-        {
-            if (ct.IsCancellationRequested) break;
-
-            step.Status = ActionItemStatus.Running;
-            FireActionPlanChanged(bot.Id, plan);
-
-            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepStart,
-                $"Step {step.StepNumber}: {step.Description}");
-
-            var stepContent = new StringBuilder();
-            var stepPrompt = BuildStepPrompt(step, stepResults, bot.Goal);
-
+            var client = CreateInferenceClient();
             try
             {
-                var sendRequest = SendInferenceRequest.CreateDefault();
-                sendRequest.Text = stepPrompt;
-                sendRequest.Temperature = bot.Temperature;
-                sendRequest.MaxTokens = bot.MaxTokens;
-                sendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
+                var planRequest = new CreateInferenceRequest
+                {
+                    ModelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName,
+                    InitializationPrompt = BuildBotPlanningPrompt(bot, userInstructions, memories),
+                    ThinkLevel = ThinkLevels.Basic
+                };
 
+                await client.CreateAsync(planRequest);
+
+                var sendRequest = SendInferenceRequest.CreateDefault();
+                sendRequest.Text = bot.Goal;
+                sendRequest.Temperature = 0.3f;
+                sendRequest.MaxTokens = 1024;
+                sendRequest.ThinkLevel = ThinkLevels.Basic;
+                sendRequest.ExampleOutput = "<plan>\n<goal>Summarize today's headlines</goal>\n<step>Search for today's top news stories</step>\n<step>Read and extract key points from each story</step>\n<step>Compile a concise summary of the headlines</step>\n</plan>";
+
+                var content = new StringBuilder();
                 var stream = client.Send(sendRequest);
                 while (await stream.ResponseStream.MoveNext(ct))
                 {
                     var chunk = stream.ResponseStream.Current;
                     if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
-                        stepContent.Append(chunk.Content);
+                        content.Append(chunk.Content);
                 }
 
-                var result = stepContent.ToString().Trim();
-                step.Status = ActionItemStatus.Complete;
-                step.Result = result;
-                stepResults.Add($"Step {step.StepNumber}: {result}");
+                var raw = content.ToString();
+                if (settings.LogInferenceOutputEnabled)
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Debug,
+                        "Plan inference response", raw);
 
-                FireActionPlanChanged(bot.Id, plan);
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    if (attempt < maxAttempts)
+                    {
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                            $"Plan inference returned empty (attempt {attempt}/{maxAttempts}), possible session timeout \u2014 retrying...");
+                        continue;
+                    }
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                        $"Plan inference returned empty after {maxAttempts} attempts");
+                    return null;
+                }
 
-                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepComplete,
-                    $"Step {step.StepNumber} complete", result.Length > 500 ? result[..500] : result);
+                var plan = PlanParser.Parse(raw);
+                if (plan is null && !string.IsNullOrWhiteSpace(raw))
+                {
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                        "Plan response did not match expected format, trying fallback parser",
+                        raw.Length > 500 ? raw[..500] + "..." : raw);
+                    plan = PlanParser.ParseFallback(raw, bot.Goal);
+                }
+                return plan;
             }
             catch (Exception ex)
             {
-                step.Status = ActionItemStatus.Failed;
-                step.Error = ex.Message;
-                stepResults.Add($"Step {step.StepNumber} failed: {ex.Message}");
-
-                FireActionPlanChanged(bot.Id, plan);
-
+                if (attempt < maxAttempts)
+                {
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                        $"Plan inference error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                    continue;
+                }
+                _logger.LogWarning(ex, "Planning failed for bot {BotId}", bot.Id);
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
-                    $"Step {step.StepNumber} failed: {ex.Message}");
+                    $"Planning failed after {maxAttempts} attempts: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                try { await client.CloseAsync(); } catch { }
             }
         }
 
-        try { await client.CloseAsync(closeOrcSession: false); } catch { }
-
-        // Synthesis
-        if (stepResults.Count > 0 && !ct.IsCancellationRequested)
-        {
-            try
-            {
-                var synthRequest = new CreateInferenceRequest
-                {
-                    ModelName = modelName,
-                    InitializationPrompt = "You are a helpful assistant. Synthesize the results below into a clear summary.",
-                    ThinkLevel = ThinkLevels.Basic
-                };
-                await client.CreateAsync(synthRequest);
-
-                var synthSend = SendInferenceRequest.CreateDefault();
-                synthSend.Text = $"Goal: {bot.Goal}\n\nResults:\n{string.Join("\n", stepResults)}\n\nProvide a concise summary.";
-                synthSend.Temperature = 0.5f;
-                synthSend.MaxTokens = bot.MaxTokens;
-
-                var synthContent = new StringBuilder();
-                var synthStream = client.Send(synthSend);
-                while (await synthStream.ResponseStream.MoveNext(ct))
-                {
-                    synthContent.Append(synthStream.ResponseStream.Current.Content);
-                }
-
-                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
-                    "Summary: " + synthContent.ToString().Trim());
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Synthesis failed for bot {BotId}", bot.Id);
-            }
-        }
+        return null;
     }
 
-    private async Task ExecuteDirectAsync(
-        InferenceClient client, BotInstance bot, UserSettings settings,
-        List<string> userInstructions, CancellationToken ct)
+    private async Task<string?> ExecutePlanStepsAsync(
+        BotInstance bot, ActionPlan plan,
+        UserSettings settings, List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
     {
+        const int maxAttempts = 3;
         var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
 
-        var createRequest = new CreateInferenceRequest
+        var stepResults = new List<string>();
+
+        var execRequest = new CreateInferenceRequest
         {
             ModelName = modelName,
-            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
+            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions, memories),
             ThinkLevel = ThinkLevels.BasicWithTools
         };
         foreach (var group in settings.GetEnabledToolGroups())
-            createRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(group));
+            execRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(group));
 
-        await client.CreateAsync(createRequest);
-
-        var sendRequest = SendInferenceRequest.CreateDefault();
-        sendRequest.Text = bot.Goal;
-        sendRequest.Temperature = bot.Temperature;
-        sendRequest.MaxTokens = bot.MaxTokens;
-        sendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
-
-        var content = new StringBuilder();
-        var stream = client.Send(sendRequest);
-        while (await stream.ResponseStream.MoveNext(ct))
+        // Execute steps — client is recreated on retry
+        var execClient = CreateInferenceClient();
+        try
         {
-            var chunk = stream.ResponseStream.Current;
-            if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
-                content.Append(chunk.Content);
+            await execClient.CreateAsync(execRequest);
+
+            foreach (var step in plan.Steps)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                step.Status = ActionItemStatus.Running;
+                FireActionPlanChanged(bot.Id, plan);
+
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepStart,
+                    $"Step {step.StepNumber}: {step.Description}");
+
+                var stepPrompt = BuildStepPrompt(step, stepResults, bot.Goal);
+
+                for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    try
+                    {
+                        if (attempt > 1)
+                        {
+                            try { await execClient.CloseAsync(); } catch { }
+                            execClient = CreateInferenceClient();
+                            await execClient.CreateAsync(execRequest);
+                        }
+
+                        var stepContent = new StringBuilder();
+                        var sendRequest = SendInferenceRequest.CreateDefault();
+                        sendRequest.Text = stepPrompt;
+                        sendRequest.Temperature = bot.Temperature;
+                        sendRequest.MaxTokens = bot.MaxTokens;
+                        sendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
+
+                        var toolsUsed = new List<string>();
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info, "Waiting for inference...");
+                        var stream = execClient.Send(sendRequest);
+                        while (await stream.ResponseStream.MoveNext(ct))
+                        {
+                            var chunk = stream.ResponseStream.Current;
+                            if (chunk.Type == InferenceResponseTypes.Tooling)
+                            {
+                                toolsUsed.Add(chunk.Content);
+                                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.SkillAction, chunk.Content);
+                            }
+                            if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
+                                stepContent.Append(chunk.Content);
+                        }
+
+                        var result = stepContent.ToString().Trim();
+                        if (settings.LogInferenceOutputEnabled)
+                            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Debug,
+                                $"Step {step.StepNumber} inference response", result);
+
+                        if (string.IsNullOrWhiteSpace(result))
+                        {
+                            if (attempt < maxAttempts)
+                            {
+                                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                                    $"Step {step.StepNumber} returned empty (attempt {attempt}/{maxAttempts}), possible session timeout \u2014 retrying...");
+                                continue;
+                            }
+                            step.Status = ActionItemStatus.Failed;
+                            step.Error = $"Inference returned empty after {maxAttempts} attempts";
+                            stepResults.Add($"Step {step.StepNumber} failed: empty response");
+                            FireActionPlanChanged(bot.Id, plan);
+                            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                                $"Step {step.StepNumber} failed: inference returned empty after {maxAttempts} attempts");
+                            break;
+                        }
+
+                        step.Status = ActionItemStatus.Complete;
+                        step.Result = result;
+                        stepResults.Add($"Step {step.StepNumber}: {result}");
+
+                        FireActionPlanChanged(bot.Id, plan);
+
+                        var completionMessage = $"Step {step.StepNumber} complete";
+                        if (toolsUsed.Count > 0)
+                            completionMessage += $" ({toolsUsed.Count} tool call{(toolsUsed.Count == 1 ? "" : "s")})";
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepComplete,
+                            completionMessage, result);
+                        break; // success — exit retry loop
+                    }
+                    catch (Exception ex)
+                    {
+                        if (attempt < maxAttempts)
+                        {
+                            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                                $"Step {step.StepNumber} error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                            continue;
+                        }
+
+                        step.Status = ActionItemStatus.Failed;
+                        step.Error = ex.Message;
+                        stepResults.Add($"Step {step.StepNumber} failed: {ex.Message}");
+
+                        FireActionPlanChanged(bot.Id, plan);
+
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                            $"Step {step.StepNumber} failed after {maxAttempts} attempts: {ex.Message}");
+                    }
+                }
+            }
+        }
+        finally
+        {
+            try { await execClient.CloseAsync(); } catch { }
         }
 
-        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
-            "Result: " + content.ToString().Trim());
+        // Synthesis with a fresh client (with retry)
+        string? synthesisResult = null;
+        if (stepResults.Count > 0 && !ct.IsCancellationRequested)
+        {
+            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepStart, "Synthesizing results...");
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                var synthClient = CreateInferenceClient();
+                try
+                {
+                    var synthRequest = new CreateInferenceRequest
+                    {
+                        ModelName = modelName,
+                        InitializationPrompt = "You are a helpful assistant. Synthesize the results below into a clear summary.",
+                        ThinkLevel = ThinkLevels.Basic
+                    };
+                    await synthClient.CreateAsync(synthRequest);
+
+                    var synthSend = SendInferenceRequest.CreateDefault();
+                    synthSend.Text = $"Goal: {bot.Goal}\n\nResults:\n{string.Join("\n", stepResults)}\n\nProvide a concise summary.";
+                    synthSend.Temperature = 0.5f;
+                    synthSend.MaxTokens = bot.MaxTokens;
+
+                    var synthContent = new StringBuilder();
+                    var synthStream = synthClient.Send(synthSend);
+                    while (await synthStream.ResponseStream.MoveNext(ct))
+                    {
+                        synthContent.Append(synthStream.ResponseStream.Current.Content);
+                    }
+
+                    var synthResult = synthContent.ToString().Trim();
+                    if (settings.LogInferenceOutputEnabled)
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Debug,
+                            "Synthesis inference response", synthResult);
+
+                    if (string.IsNullOrWhiteSpace(synthResult))
+                    {
+                        if (attempt < maxAttempts)
+                        {
+                            await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                                $"Synthesis returned empty (attempt {attempt}/{maxAttempts}), possible session timeout \u2014 retrying...");
+                            continue;
+                        }
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                            $"Synthesis returned empty after {maxAttempts} attempts");
+                        break;
+                    }
+
+                    synthesisResult = synthResult;
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
+                        "Summary: " + synthResult);
+                    break; // success
+                }
+                catch (Exception ex)
+                {
+                    if (attempt < maxAttempts)
+                    {
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                            $"Synthesis error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                        continue;
+                    }
+                    _logger.LogWarning(ex, "Synthesis failed for bot {BotId}", bot.Id);
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                        $"Synthesis failed after {maxAttempts} attempts: {ex.Message}");
+                }
+                finally
+                {
+                    try { await synthClient.CloseAsync(); } catch { }
+                }
+            }
+        }
+
+        return synthesisResult;
+    }
+
+    private async Task<string?> ExecuteDirectAsync(
+        BotInstance bot, UserSettings settings,
+        List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
+    {
+        const int maxAttempts = 3;
+        var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var client = CreateInferenceClient();
+            try
+            {
+                var createRequest = new CreateInferenceRequest
+                {
+                    ModelName = modelName,
+                    InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions, memories),
+                    ThinkLevel = ThinkLevels.BasicWithTools
+                };
+                foreach (var group in settings.GetEnabledToolGroups())
+                    createRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(group));
+
+                await client.CreateAsync(createRequest);
+
+                var sendRequest = SendInferenceRequest.CreateDefault();
+                sendRequest.Text = bot.Goal;
+                sendRequest.Temperature = bot.Temperature;
+                sendRequest.MaxTokens = bot.MaxTokens;
+                sendRequest.ThinkLevel = ThinkLevels.BasicWithTools;
+
+                var content = new StringBuilder();
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info, "Waiting for inference...");
+                var stream = client.Send(sendRequest);
+                while (await stream.ResponseStream.MoveNext(ct))
+                {
+                    var chunk = stream.ResponseStream.Current;
+                    if (chunk.Type == InferenceResponseTypes.Tooling)
+                    {
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.SkillAction, chunk.Content);
+                    }
+                    if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
+                        content.Append(chunk.Content);
+                }
+
+                var directResult = content.ToString().Trim();
+                if (settings.LogInferenceOutputEnabled)
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Debug,
+                        "Direct inference response", directResult);
+
+                if (string.IsNullOrWhiteSpace(directResult))
+                {
+                    if (attempt < maxAttempts)
+                    {
+                        await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                            $"Direct inference returned empty (attempt {attempt}/{maxAttempts}), possible session timeout \u2014 retrying...");
+                        continue;
+                    }
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                        $"Direct inference returned empty after {maxAttempts} attempts");
+                    return null;
+                }
+
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
+                    "Result", directResult);
+                return directResult;
+            }
+            catch (Exception ex)
+            {
+                if (attempt < maxAttempts)
+                {
+                    await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
+                        $"Direct inference error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                    continue;
+                }
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
+                    $"Direct inference failed after {maxAttempts} attempts: {ex.Message}");
+            }
+            finally
+            {
+                try { await client.CloseAsync(); } catch { }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task ExtractAndStoreMemoriesAsync(
+        BotInstance bot, UserSettings settings, string cycleOutput, CancellationToken ct)
+    {
+        try
+        {
+            var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
+            var client = CreateInferenceClient();
+            try
+            {
+                var request = new CreateInferenceRequest
+                {
+                    ModelName = modelName,
+                    InitializationPrompt = "You are a memory extraction assistant. Given a bot's execution output, extract key facts worth remembering for future runs.",
+                    ThinkLevel = ThinkLevels.Basic
+                };
+                await client.CreateAsync(request);
+
+                var sendRequest = SendInferenceRequest.CreateDefault();
+                sendRequest.Text = $"""
+                    Bot goal: {bot.Goal}
+                    Execution #{bot.ExecutionCount} output:
+                    {cycleOutput}
+
+                    Extract the key facts worth remembering for future executions. Focus on:
+                    - Specific outputs produced (so they are not repeated)
+                    - Decisions made or approaches taken
+                    - User preferences or feedback discovered
+                    - Items to avoid repeating next time
+
+                    Output one fact per line, no numbering, no bullets, no blank lines.
+                    If there is nothing worth remembering, output exactly: NONE
+                    """;
+                sendRequest.Temperature = 0.2f;
+                sendRequest.MaxTokens = 512;
+                sendRequest.ThinkLevel = ThinkLevels.Basic;
+
+                var content = new StringBuilder();
+                var stream = client.Send(sendRequest);
+                while (await stream.ResponseStream.MoveNext(ct))
+                {
+                    var chunk = stream.ResponseStream.Current;
+                    if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
+                        content.Append(chunk.Content);
+                }
+
+                var raw = content.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var facts = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var fact in facts)
+                {
+                    if (string.IsNullOrWhiteSpace(fact) || fact.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    await _botStore.AddMemoryAsync(new BotMemoryEntry
+                    {
+                        BotId = bot.Id,
+                        ExecutionNumber = bot.ExecutionCount,
+                        Content = fact
+                    });
+                }
+
+                await _botStore.PruneMemoryAsync(bot.Id, bot.MaxMemoryEntries);
+
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
+                    $"Memory updated ({facts.Length} fact{(facts.Length == 1 ? "" : "s")} extracted)");
+            }
+            finally
+            {
+                try { await client.CloseAsync(); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Memory extraction failed for bot {BotId} — this is non-fatal", bot.Id);
+        }
     }
 
     private async void OnSchedulerTick(object? state)
@@ -573,7 +945,25 @@ public class BotEngine : IBotEngine, IDisposable
         if (_runtimes.TryGetValue(botId, out var runtime))
         {
             runtime.OutputChannel.Writer.TryWrite(entry);
+
+            if (runtime.LogFileWriter is { } writer)
+            {
+                try
+                {
+                    var time = entry.Timestamp.ToLocalTime().ToString("HH:mm:ss");
+                    writer.WriteLine($"[{time}] [{entry.Level,-13}] {entry.Message}");
+                    if (!string.IsNullOrWhiteSpace(entry.Detail))
+                    {
+                        foreach (var line in entry.Detail.Split('\n'))
+                            writer.WriteLine($"{"",28}{line.TrimEnd('\r')}");
+                    }
+                    writer.Flush();
+                }
+                catch { /* don't let file I/O break execution */ }
+            }
         }
+
+        BotLogEntryAdded?.Invoke(this, entry);
     }
 
     private void FireActionPlanChanged(Guid botId, ActionPlan plan)
@@ -592,13 +982,21 @@ public class BotEngine : IBotEngine, IDisposable
         return factory.Create();
     }
 
-    private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null)
+    private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null, List<BotMemoryEntry>? memories = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot task planner.");
         if (!string.IsNullOrWhiteSpace(bot.Persona))
             sb.AppendLine($"Persona: {bot.Persona}");
         sb.AppendLine();
+
+        if (memories is { Count: > 0 })
+        {
+            sb.AppendLine("MEMORY — Important context from previous executions (do NOT repeat previous outputs):");
+            foreach (var m in memories)
+                sb.AppendLine($"- [Run #{m.ExecutionNumber}] {m.Content}");
+            sb.AppendLine();
+        }
 
         if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
         {
@@ -622,25 +1020,41 @@ public class BotEngine : IBotEngine, IDisposable
             - Each step must be a single, specific action
             - Use 2 to 5 steps maximum
             - Do NOT include a "summarize" step - that happens automatically
-            - Output ONLY the plan in the exact format below
+            - You MUST respond with ONLY the XML below — no other text, no commentary, no markdown
 
-            Format:
+            You must use this exact XML format:
             <plan>
             <goal>One sentence describing the goal</goal>
             <step>First thing to do</step>
             <step>Second thing to do</step>
             </plan>
+
+            Example — if the goal is "Get the weather forecast":
+            <plan>
+            <goal>Get the weather forecast for today</goal>
+            <step>Search for the current weather conditions</step>
+            <step>Look up the forecast for the rest of the day</step>
+            <step>Format the weather information clearly</step>
+            </plan>
             """);
         return sb.ToString();
     }
 
-    private static string BuildBotExecutionPrompt(BotInstance bot, List<string>? userInstructions = null)
+    private static string BuildBotExecutionPrompt(BotInstance bot, List<string>? userInstructions = null, List<BotMemoryEntry>? memories = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot executing a task.");
         if (!string.IsNullOrWhiteSpace(bot.Persona))
             sb.AppendLine($"Persona: {bot.Persona}");
         sb.AppendLine($"Goal: {bot.Goal}");
+
+        if (memories is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("MEMORY — Important context from previous executions (do NOT repeat previous outputs):");
+            foreach (var m in memories)
+                sb.AppendLine($"- [Run #{m.ExecutionNumber}] {m.Content}");
+        }
 
         if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
         {
@@ -680,11 +1094,49 @@ public class BotEngine : IBotEngine, IDisposable
         return sb.ToString();
     }
 
+    private static void WriteLogFileHeader(StreamWriter writer, BotInstance bot, UserSettings settings)
+    {
+        var divider = new string('\u2550', 60);
+        writer.WriteLine(divider);
+        writer.WriteLine("  Bot Run Log");
+        writer.WriteLine(divider);
+        writer.WriteLine($"  Bot:          {bot.Label}");
+        writer.WriteLine($"  Goal:         {bot.Goal}");
+        writer.WriteLine($"  Persona:      {bot.Persona ?? "(none)"}");
+        writer.WriteLine($"  Model:        {(!string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName)}");
+        writer.WriteLine($"  Temperature:  {bot.Temperature:F1}");
+        writer.WriteLine($"  Max Tokens:   {bot.MaxTokens}");
+        writer.WriteLine($"  Schedule:     {bot.ScheduleType}{(bot.ScheduleIntervalMinutes > 0 ? $" (every {bot.ScheduleIntervalMinutes} min)" : "")}");
+
+        var skillIds = bot.GetEnabledSkillIds();
+        writer.WriteLine($"  Skills:       {(skillIds.Count > 0 ? string.Join(", ", skillIds) : "(all)")}");
+
+        var toolGroups = settings.GetEnabledToolGroups();
+        writer.WriteLine($"  Tool Groups:  {(toolGroups.Count > 0 ? string.Join(", ", toolGroups) : "(none)")}");
+
+        writer.WriteLine($"  Run #:        {bot.ExecutionCount}");
+        writer.WriteLine($"  Started:      {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        writer.WriteLine(divider);
+        writer.WriteLine();
+        writer.Flush();
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new StringBuilder(name.Length);
+        foreach (var c in name)
+            sb.Append(invalid.Contains(c) ? '_' : c);
+        // Replace spaces with hyphens for readability
+        return sb.ToString().Replace(' ', '-').Trim('-');
+    }
+
     public void Dispose()
     {
         _schedulerTimer.Dispose();
         foreach (var kvp in _runtimes)
         {
+            kvp.Value.LogFileWriter?.Dispose();
             kvp.Value.Cts.Cancel();
             kvp.Value.Cts.Dispose();
         }
@@ -697,5 +1149,6 @@ public class BotEngine : IBotEngine, IDisposable
         public Channel<BotLogEntry> OutputChannel { get; } = outputChannel;
         public Task? ExecutionTask { get; set; }
         public ConcurrentQueue<string> UserMessages { get; } = new();
+        public StreamWriter? LogFileWriter { get; set; }
     }
 }

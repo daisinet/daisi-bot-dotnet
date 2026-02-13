@@ -49,6 +49,8 @@ else
                        StartIcon="@Icons.Material.Filled.Edit" OnClick="EditBot">Edit</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.List" OnClick="ToggleSteps">@(_statusPanelVisible ? "Hide Steps" : "Show Steps")</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Memory" OnClick="ClearMemory">Clear Memory</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteBot">Delete</MudButton>
         </MudToolBar>
@@ -262,6 +264,19 @@ else
                 await BotEngine.StopBotAsync(_bot.Id);
             await BotStore.DeleteAsync(_bot.Id);
             await OnBotDeleted.InvokeAsync();
+        }
+    }
+
+    private async Task ClearMemory()
+    {
+        if (_bot is null) return;
+        var result = await DialogService.ShowMessageBox(
+            "Clear Memory",
+            $"Are you sure you want to clear all memory for '{_bot.Label}'?",
+            yesText: "Clear", cancelText: "Cancel");
+        if (result == true)
+        {
+            await BotStore.ClearMemoryAsync(_bot.Id);
         }
     }
 

@@ -43,6 +43,8 @@ public class SqliteBotStore(IDbContextFactory<DaisiBotDbContext> dbFactory) : IB
         var bot = await db.Bots.FindAsync(id);
         if (bot is not null)
         {
+            var memories = await db.BotMemoryEntries.Where(m => m.BotId == id).ToListAsync();
+            db.BotMemoryEntries.RemoveRange(memories);
             db.Bots.Remove(bot);
             await db.SaveChangesAsync();
         }
@@ -108,6 +110,49 @@ public class SqliteBotStore(IDbContextFactory<DaisiBotDbContext> dbFactory) : IB
             db.BotSteps.Add(step);
         }
 
+        await db.SaveChangesAsync();
+    }
+
+    public async Task AddMemoryAsync(BotMemoryEntry entry)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.BotMemoryEntries.Add(entry);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<List<BotMemoryEntry>> GetMemoriesAsync(Guid botId, int limit = 50)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.BotMemoryEntries
+            .Where(m => m.BotId == botId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(limit)
+            .OrderBy(m => m.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task ClearMemoryAsync(Guid botId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var entries = await db.BotMemoryEntries
+            .Where(m => m.BotId == botId)
+            .ToListAsync();
+        db.BotMemoryEntries.RemoveRange(entries);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task PruneMemoryAsync(Guid botId, int maxEntries)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var count = await db.BotMemoryEntries.CountAsync(m => m.BotId == botId);
+        if (count <= maxEntries) return;
+
+        var toRemove = await db.BotMemoryEntries
+            .Where(m => m.BotId == botId)
+            .OrderBy(m => m.CreatedAt)
+            .Take(count - maxEntries)
+            .ToListAsync();
+        db.BotMemoryEntries.RemoveRange(toRemove);
         await db.SaveChangesAsync();
     }
 }

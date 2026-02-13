@@ -9,5 +9,13 @@ public enum ToolGroupSelection
     CodingTools,
     MediaTools,
     IntegrationTools,
-    SocialTools
+    SocialTools,
+    ShellTools,
+    ScreenTools,
+    InputTools,
+    ClipboardTools,
+    BrowserTools,
+    WindowTools,
+    SystemTools,
+    GitTools
 }

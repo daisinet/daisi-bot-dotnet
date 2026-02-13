@@ -10,7 +10,7 @@ namespace DaisiBot.Agent.Skills;
 
 public class SkillFileLoader : ISkillFileLoader
 {
-    private static readonly string[] Categories = ["builtin", "community", "custom"];
+    private static readonly string[] Categories = ["builtin", "community", "custom", "marketplace"];
     private static readonly string[] SupportedExtensions = [".md", ".txt", ".json", ".yaml", ".yml"];
 
     private readonly string _basePath;
