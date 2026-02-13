@@ -1,6 +1,6 @@
 # DaisiBot .NET
 
-A multi-platform AI chatbot client for the [DAISI](https://daisinet.com) decentralized inference network. DaisiBot provides three interfaces — a terminal UI, a native desktop/mobile app, and a web application — all powered by a shared service layer that streams responses from DAISI-hosted language models.
+A multi-platform AI chatbot client for the [DAISI](https://daisinet.com) decentralized inference network. DaisiBot provides two interfaces — a terminal UI and a native desktop/mobile app — both powered by a shared service layer that streams responses from DAISI-hosted language models.
 
 ## Architecture
 
@@ -13,8 +13,7 @@ DaisiBot.slnx
 ├── DaisiBot.Shared.UI     Reusable Blazor/MudBlazor components
 │
 ├── DaisiBot.Tui           Terminal UI (raw ANSI console)
-├── DaisiBot.Maui          Native app (Blazor Hybrid — Windows, macOS, iOS, Android)
-└── DaisiBot.Web           Web app (ASP.NET Blazor Server + skill marketplace)
+└── DaisiBot.Maui          Native app (Blazor Hybrid — Windows, macOS, iOS, Android)
 ```
 
 All projects target **.NET 10.0**.
@@ -157,18 +156,6 @@ Cross-platform native app using .NET MAUI Blazor Hybrid. Targets Windows (WinUI)
 - Auth redirect: unauthenticated users are sent to `/login`, logout navigates back
 - On first render (after auth), checks for missing models and shows `ModelDownloadDialog` with progress if downloads are needed
 
-### DaisiBot.Web
-
-ASP.NET Core Blazor Server application with skill marketplace features.
-
-- Cookie-based authentication via `AddDaisiForWeb()` / `AddDaisiCookieKeyProvider()`
-- **CosmoSkillService** — `ISkillService` implementation backed by Cosmos DB (via `Daisi.Orc.Core`)
-  - Public skill marketplace with search and tag filtering
-  - Skill creation, publishing, and review workflow (Draft → PendingReview → Approved/Rejected)
-  - Per-account skill installation tracking
-- Interactive server-side rendering with MudBlazor
-- Configuration loaded from `appsettings.json` (DAISI network, Cosmos DB connection)
-
 ## Key Concepts
 
 ### Authentication
@@ -249,21 +236,13 @@ dotnet run --project src/DaisiBot.Maui -f net10.0-windows10.0.19041.0
 
 The login page appears on startup. After authentication, required models are downloaded automatically if not already present. Use the sidebar to manage conversations and navigate between Chat, Settings, and Skills pages.
 
-### Run the Web App
-
-```bash
-dotnet run --project src/DaisiBot.Web
-```
-
-Configure DAISI network and Cosmos DB settings in `appsettings.json`.
-
 ## Data Storage
 
 All client apps (TUI, MAUI) store data locally in SQLite at:
 - **Windows**: `%LocalAppData%\DaisiBot\daisibot.db`
 - **macOS/Linux**: `~/.local/share/DaisiBot/daisibot.db`
 
-The Web app uses Cosmos DB for the skill marketplace and cookie-based sessions for auth.
+Skill marketplace features have been migrated to the [DAISI Manager](https://manager.daisinet.com) and the [DAISI public website](https://daisinet.com/learn/daisibotmastery).
 
 ## License
 
