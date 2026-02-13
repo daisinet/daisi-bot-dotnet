@@ -51,12 +51,7 @@ namespace DaisiBot.LocalTools.Input
 
                 NativeInterop.SetCursorPos(x, y);
 
-                var (downFlag, upFlag) = button.ToLower() switch
-                {
-                    "right" => (NativeInterop.MOUSEEVENTF_RIGHTDOWN, NativeInterop.MOUSEEVENTF_RIGHTUP),
-                    "middle" => (NativeInterop.MOUSEEVENTF_MIDDLEDOWN, NativeInterop.MOUSEEVENTF_MIDDLEUP),
-                    _ => (NativeInterop.MOUSEEVENTF_LEFTDOWN, NativeInterop.MOUSEEVENTF_LEFTUP)
-                };
+                var (downFlag, upFlag) = NativeInterop.GetMouseButtonFlags(button);
 
                 for (int i = 0; i < clicks; i++)
                 {

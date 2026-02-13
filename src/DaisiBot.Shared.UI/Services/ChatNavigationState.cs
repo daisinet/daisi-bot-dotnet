@@ -1,20 +1,7 @@
 namespace DaisiBot.Shared.UI.Services;
 
-public class ChatNavigationState
+public class ChatNavigationState : NavigationState<Guid>
 {
-    public Guid? CurrentConversationId { get; private set; }
-
-    public event Action? Changed;
-
-    public void SelectConversation(Guid id)
-    {
-        CurrentConversationId = id;
-        Changed?.Invoke();
-    }
-
-    public void Clear()
-    {
-        CurrentConversationId = null;
-        Changed?.Invoke();
-    }
+    public Guid? CurrentConversationId => CurrentId;
+    public void SelectConversation(Guid id) => Select(id);
 }
