@@ -185,5 +185,15 @@ namespace DaisiBot.LocalTools.Native
         internal const uint CF_DIB = 8;
         internal const uint CF_BITMAP = 2;
         internal const uint GMEM_MOVEABLE = 0x0002;
+
+        internal static (uint downFlag, uint upFlag) GetMouseButtonFlags(string button)
+        {
+            return button.ToLower() switch
+            {
+                "right" => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+                "middle" => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+                _ => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
+            };
+        }
     }
 }
