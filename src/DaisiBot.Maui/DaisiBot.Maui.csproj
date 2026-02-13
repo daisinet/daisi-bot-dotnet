@@ -23,6 +23,32 @@
     <PackageReference Include="Markdig" Version="0.40.0" />
   </ItemGroup>
 
+  <!-- Suppress LlamaSharp backend packages entirely — not usable on mobile targets,
+       and the native libs cause Android build failures (missing android-x86_64 .so files).
+       ExcludeAssets prevents compile/runtime assets; the Target below removes AndroidNativeLibrary
+       items injected by the packages' .props files (which reference non-existent .so files). -->
+  <ItemGroup>
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.25.0" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- LlamaSharp backend .props files inject AndroidNativeLibrary items for android ABIs,
+       but the CPU package doesn't ship those .so files, causing XABAA7028 FileNotFoundException.
+       Strip all LlamaSharp native libs from the Android APK — they aren't usable on mobile.
+       Must remove from both AndroidNativeLibrary (source) and _AndroidNativeLibraryForFastDev
+       (copy created by _CompileFastDevDex in Debug/FastDev builds). -->
+  <Target Name="_RemoveLlamaSharpAndroidNativeLibs"
+          BeforeTargets="_CompileFastDevDex;_BuildApkFastDev;_BuildApkEmbed"
+          Condition="$(TargetFramework.Contains('android'))">
+    <ItemGroup>
+      <AndroidNativeLibrary Remove="@(AndroidNativeLibrary)"
+          Condition="$([System.String]::new('%(Identity)').ToLowerInvariant().Contains('llamasharp'))" />
+      <_AndroidNativeLibraryForFastDev Remove="@(_AndroidNativeLibraryForFastDev)"
+          Condition="$([System.String]::new('%(Identity)').ToLowerInvariant().Contains('llamasharp'))" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\DaisiBot.Core\DaisiBot.Core.csproj" />
     <ProjectReference Include="..\DaisiBot.Agent\DaisiBot.Agent.csproj" />

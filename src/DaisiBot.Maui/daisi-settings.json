@@ -1,0 +1,38 @@
+{
+  "Peer": {
+    "Peers": [],
+    "DiscoveryPort": 4242,
+    "MaxPeers": 10
+  },
+  "Host": {
+    "Id": "",
+    "Name": "DAVID-WORK-PC",
+    "MaxConcurrentSessions": 5,
+    "SecretKey": "",
+    "OrcIpAddressOrDomain": "orc-dev.daisinet.com",
+    "OrcPort": 443,
+    "AutoUpdate": true,
+    "LogLevel": "Information",
+    "OrcUseSSL": true
+  },
+  "Model": {
+    "ModelFolderPath": "C:\\repos\\daisinet\\daisi-bot-dotnet\\src\\DaisiBot.Maui\\daisi-gguf-models",
+    "Models": [],
+    "AutomaticDownloads": true,
+    "LLama": {
+      "Runtime": 0,
+      "ShowLogs": true,
+      "AutoFallback": true,
+      "SkipCheck": false,
+      "LlamaPath": "",
+      "LlavaPath": "",
+      "ContextSize": 2048,
+      "GpuLayerCount": -1,
+      "BatchSize": 128
+    }
+  },
+  "Storage": {
+    "Location": 0,
+    "LocalPath": "C:\\repos\\daisinet\\daisi-bot-dotnet\\src\\DaisiBot.Maui\\daisi-files"
+  }
+}

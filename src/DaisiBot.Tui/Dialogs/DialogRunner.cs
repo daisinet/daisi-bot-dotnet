@@ -203,3 +203,83 @@ public class ConfirmDialog : IModal
         return lines;
     }
 }
+
+/// <summary>
+/// Three-option host mode picker: SelfHost / DaisiNet / Localhost.
+/// </summary>
+public class HostModeDialog : IModal
+{
+    private readonly App _app;
+    private readonly Action<int> _callback;
+    private DialogRunner.BoxBounds? _box;
+    private int _selectedIndex;
+
+    private static readonly string[] Labels = ["SelfHost", "DaisiNet", "Localhost"];
+    private static readonly string[] Descriptions =
+    [
+        "Run inference locally using GGUF models",
+        "Use DaisiNet cloud ORC (charges may apply)",
+        "Connect to localhost:5001 for debugging"
+    ];
+
+    public HostModeDialog(App app, int currentIndex, Action<int> callback)
+    {
+        _app = app;
+        _selectedIndex = currentIndex;
+        _callback = callback;
+    }
+
+    public void Draw()
+    {
+        const int boxWidth = 52;
+        const int boxHeight = 8;
+        _box = DialogRunner.DrawCenteredBox(_app, "Host Mode", boxWidth, boxHeight);
+
+        // Description of selected mode
+        var desc = Descriptions[_selectedIndex];
+        DialogRunner.DrawLabel(_box, 1, desc.PadRight(_box.InnerWidth));
+
+        // Buttons row
+        var btnRow = _box.InnerTop + 3;
+        var totalWidth = Labels.Sum(l => l.Length + 4) + (Labels.Length - 1) * 2;
+        var btnLeft = _box.InnerLeft + (_box.InnerWidth - totalWidth) / 2;
+
+        for (var i = 0; i < Labels.Length; i++)
+        {
+            var label = $" {Labels[i]} ";
+            if (i == _selectedIndex)
+                AnsiConsole.SetReverse();
+            AnsiConsole.WriteAt(btnRow, btnLeft, label);
+            AnsiConsole.ResetStyle();
+            btnLeft += label.Length + 2;
+        }
+
+        DialogRunner.DrawButtonHints(_box, " Left/Right:Navigate  Enter:Select  Esc:Cancel ");
+    }
+
+    public void HandleKey(ConsoleKeyInfo key)
+    {
+        switch (key.Key)
+        {
+            case ConsoleKey.LeftArrow:
+                _selectedIndex = (_selectedIndex + Labels.Length - 1) % Labels.Length;
+                Draw();
+                break;
+
+            case ConsoleKey.RightArrow:
+            case ConsoleKey.Tab:
+                _selectedIndex = (_selectedIndex + 1) % Labels.Length;
+                Draw();
+                break;
+
+            case ConsoleKey.Enter:
+                _app.CloseModal();
+                _callback(_selectedIndex);
+                break;
+
+            case ConsoleKey.Escape:
+                _app.CloseModal();
+                break;
+        }
+    }
+}

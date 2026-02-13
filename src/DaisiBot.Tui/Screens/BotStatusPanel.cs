@@ -7,6 +7,7 @@ public class BotStatusPanel
 {
     private ActionPlan? _plan;
     private BotInstance? _bot;
+    private List<string> _skillNames = [];
 
     public int Top { get; set; }
     public int Left { get; set; }
@@ -22,6 +23,11 @@ public class BotStatusPanel
     public void SetPlan(ActionPlan? plan)
     {
         _plan = plan;
+    }
+
+    public void SetSkills(List<string> skillNames)
+    {
+        _skillNames = skillNames;
     }
 
     public void Clear()
@@ -121,21 +127,38 @@ public class BotStatusPanel
             }
         }
 
+        // --- Skills subheading ---
+        if (_skillNames.Count > 0 && contentRow < listHeight)
+        {
+            DrawSectionDivider(Top + 1 + contentRow, contentWidth, " Skills ");
+            contentRow++;
+
+            foreach (var skillName in _skillNames)
+            {
+                if (contentRow >= listHeight) break;
+                var row = Top + 1 + contentRow;
+                DrawBorderLeft(row);
+                var display = $" \u2022 {skillName}";
+                if (display.Length > contentWidth) display = display[..(contentWidth - 2)] + "..";
+                AnsiConsole.SetForeground(ConsoleColor.White);
+                AnsiConsole.WriteAt(row, Left + 1, display.PadRight(contentWidth));
+                AnsiConsole.ResetStyle();
+                DrawBorderRight(row);
+                contentRow++;
+            }
+
+            // Padding line
+            if (contentRow < listHeight)
+            {
+                DrawEmptyLine(Top + 1 + contentRow, contentWidth);
+                contentRow++;
+            }
+        }
+
         // --- Steps subheading ---
         if (contentRow < listHeight)
         {
-            DrawBorderLeft(Top + 1 + contentRow);
-            // Horizontal divider with " Steps " label
-            AnsiConsole.SetForeground(ConsoleColor.DarkCyan);
-            AnsiConsole.WriteAt(Top + 1 + contentRow, Left + 1, new string('\u2500', contentWidth));
-            AnsiConsole.ResetStyle();
-            var stepsLabel = " Steps ";
-            var stepsLabelStart = Left + (Width - stepsLabel.Length) / 2;
-            AnsiConsole.SetForeground(ConsoleColor.Cyan);
-            AnsiConsole.SetBold();
-            AnsiConsole.WriteAt(Top + 1 + contentRow, stepsLabelStart, stepsLabel);
-            AnsiConsole.ResetStyle();
-            DrawBorderRight(Top + 1 + contentRow);
+            DrawSectionDivider(Top + 1 + contentRow, contentWidth, " Steps ");
             contentRow++;
         }
 
@@ -205,6 +228,20 @@ public class BotStatusPanel
         AnsiConsole.SetForeground(ConsoleColor.DarkCyan);
         AnsiConsole.WriteAt(row, Left + Width - 1, "\u2502");
         AnsiConsole.ResetStyle();
+    }
+
+    private void DrawSectionDivider(int row, int contentWidth, string label)
+    {
+        DrawBorderLeft(row);
+        AnsiConsole.SetForeground(ConsoleColor.DarkCyan);
+        AnsiConsole.WriteAt(row, Left + 1, new string('\u2500', contentWidth));
+        AnsiConsole.ResetStyle();
+        var labelStart = Left + (Width - label.Length) / 2;
+        AnsiConsole.SetForeground(ConsoleColor.Cyan);
+        AnsiConsole.SetBold();
+        AnsiConsole.WriteAt(row, labelStart, label);
+        AnsiConsole.ResetStyle();
+        DrawBorderRight(row);
     }
 
     private void DrawEmptyLine(int row, int contentWidth)

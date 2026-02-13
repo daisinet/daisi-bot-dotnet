@@ -14,6 +14,14 @@ public static class ToolPermissions
         [ToolGroupSelection.FileTools] = (ToolPermissionLevel.Elevated, "Read, write, and manage files on your local system. This grants access to your filesystem."),
         [ToolGroupSelection.CommunicationTools] = (ToolPermissionLevel.Elevated, "Send emails, messages, and notifications on your behalf."),
         [ToolGroupSelection.IntegrationTools] = (ToolPermissionLevel.Elevated, "Connect to third-party services and APIs with your credentials."),
+        [ToolGroupSelection.WindowTools] = (ToolPermissionLevel.Standard, "List, focus, resize, and manage desktop windows."),
+        [ToolGroupSelection.GitTools] = (ToolPermissionLevel.Standard, "Run git commands such as status, diff, log, commit, and branch operations."),
+        [ToolGroupSelection.ShellTools] = (ToolPermissionLevel.Elevated, "Execute shell commands and scripts on your local system."),
+        [ToolGroupSelection.ScreenTools] = (ToolPermissionLevel.Elevated, "Capture screenshots and read content from your screen."),
+        [ToolGroupSelection.InputTools] = (ToolPermissionLevel.Elevated, "Simulate mouse clicks, keyboard input, and other HID events."),
+        [ToolGroupSelection.ClipboardTools] = (ToolPermissionLevel.Elevated, "Read and write to the system clipboard."),
+        [ToolGroupSelection.BrowserTools] = (ToolPermissionLevel.Elevated, "Open URLs, extract web content, and automate browser actions."),
+        [ToolGroupSelection.SystemTools] = (ToolPermissionLevel.Elevated, "Query system information, list processes, and manage environment variables."),
     };
 
     public static ToolPermissionLevel GetPermissionLevel(ToolGroupSelection group)

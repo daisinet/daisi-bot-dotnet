@@ -687,11 +687,13 @@ public class DaisiBotChatService : IChatService
         }
 
         string? inferenceId = null;
+        string? sessionId = null;
         string? createError = null;
         try
         {
             var createResponse = await _localInference!.CreateSessionAsync(createRequest);
             inferenceId = createResponse.InferenceId;
+            sessionId = createResponse.SessionId;
         }
         catch (Exception ex)
         {
@@ -706,6 +708,8 @@ public class DaisiBotChatService : IChatService
         }
 
         var sendRequest = SendInferenceRequest.CreateDefault();
+        sendRequest.InferenceId = inferenceId!;
+        sendRequest.SessionId = sessionId!;
         sendRequest.Text = FormatConversationHistory(conversation.Messages, userMessage);
         sendRequest.Temperature = config.Temperature;
         sendRequest.TopP = config.TopP;
@@ -951,7 +955,7 @@ public class DaisiBotChatService : IChatService
         return factory.Create();
     }
 
-    private static string FormatConversationHistory(List<ChatMessage> messages, string latestUserMessage)
+    internal static string FormatConversationHistory(List<ChatMessage> messages, string latestUserMessage)
     {
         var sb = new StringBuilder();
 

@@ -15,6 +15,7 @@
     <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
     <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.SDK\Daisi.SDK.csproj" />
     <ProjectReference Include="..\..\..\daisi-hosts-dotnet\Daisi.Host.Core\Daisi.Host.Core.csproj" />
+    <ProjectReference Include="..\DaisiBot.LocalTools\DaisiBot.LocalTools.csproj" />
   </ItemGroup>
 
   <ItemGroup>

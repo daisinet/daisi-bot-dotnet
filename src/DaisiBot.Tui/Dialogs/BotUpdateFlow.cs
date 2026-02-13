@@ -2,6 +2,7 @@ using System.Text;
 using DaisiBot.Core.Enums;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
+using DaisiBot.Core.Models.Skills;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DaisiBot.Tui.Dialogs;
@@ -15,7 +16,7 @@ public class BotUpdateFlow : IModal
     private readonly Action _onUpdated;
     private DialogRunner.BoxBounds? _box;
 
-    private enum Field { Label, Goal, Persona, Schedule, IntervalInput, Steps }
+    private enum Field { Label, Goal, Persona, Schedule, IntervalInput, Skills, Steps }
     private Field _field = Field.Label;
 
     private readonly StringBuilder _labelBuffer = new();
@@ -27,6 +28,11 @@ public class BotUpdateFlow : IModal
     private int _personaCursor;
     private int _intervalCursor;
     private int _scheduleIndex;
+
+    // Skills
+    private List<(string Id, string Name, bool Enabled)> _skillItems = [];
+    private int _skillSelectedIndex;
+    private int _skillScrollOffset;
 
     // Steps
     private readonly List<string> _steps = [];
@@ -74,14 +80,25 @@ public class BotUpdateFlow : IModal
             _intervalCursor = _intervalBuffer.Length;
         }
 
-        // Load steps async
+        var enabledSkillIds = new HashSet<string>(bot.GetEnabledSkillIds(), StringComparer.OrdinalIgnoreCase);
+
+        // Load steps and skills async
+        var skillFileLoader = services.GetRequiredService<ISkillFileLoader>();
         Task.Run(async () =>
         {
             var steps = await _botStore.GetStepsAsync(bot.Id);
+            var allSkills = await skillFileLoader.LoadAllAsync();
+
             _app.Post(() =>
             {
                 foreach (var s in steps)
                     _steps.Add(s.Description);
+
+                _skillItems = allSkills
+                    .OrderBy(s => s.Name)
+                    .Select(s => (s.Id, s.Name, enabledSkillIds.Contains(s.Id)))
+                    .ToList();
+
                 Draw();
                 AnsiConsole.Flush();
             });
@@ -90,7 +107,8 @@ public class BotUpdateFlow : IModal
 
     public void Draw()
     {
-        var boxHeight = 28 + Math.Max(_steps.Count, 1);
+        var skillRowCount = Math.Max(_skillItems.Count, 1);
+        var boxHeight = 30 + Math.Min(skillRowCount, 6) + Math.Max(_steps.Count, 1);
         if (boxHeight > _app.Height - 4) boxHeight = _app.Height - 4;
         _box = DialogRunner.DrawCenteredBox(_app, "Edit Bot", 60, boxHeight);
 
@@ -142,6 +160,64 @@ public class BotUpdateFlow : IModal
             row++;
             DialogRunner.DrawTextField(_box, row, _intervalBuffer.ToString(), _field == Field.IntervalInput && !_busy);
             row++;
+        }
+        row++;
+
+        // Skills
+        DialogRunner.DrawLabel(_box, row, "Skills (Space to toggle):");
+        row++;
+
+        if (_skillItems.Count == 0)
+        {
+            AnsiConsole.SetDim();
+            AnsiConsole.WriteAt(_box.InnerTop + row, _box.InnerLeft, "  (loading...)".PadRight(_box.InnerWidth));
+            AnsiConsole.ResetStyle();
+            row++;
+        }
+        else
+        {
+            var maxSkillRows = Math.Min(_skillItems.Count, 6);
+            // Adjust scroll offset to keep selected item visible
+            if (_skillSelectedIndex < _skillScrollOffset)
+                _skillScrollOffset = _skillSelectedIndex;
+            if (_skillSelectedIndex >= _skillScrollOffset + maxSkillRows)
+                _skillScrollOffset = _skillSelectedIndex - maxSkillRows + 1;
+
+            for (var vi = 0; vi < maxSkillRows; vi++)
+            {
+                if (row >= _box.InnerHeight - 3) break;
+                var i = _skillScrollOffset + vi;
+                if (i >= _skillItems.Count) break;
+
+                var (id, name, enabled) = _skillItems[i];
+                var check = enabled ? "[x]" : "[ ]";
+                var pointer = (_field == Field.Skills && i == _skillSelectedIndex) ? "> " : "  ";
+                var skillText = $"{pointer}{check} {name}";
+                if (skillText.Length > _box.InnerWidth)
+                    skillText = skillText[..(_box.InnerWidth - 2)] + "..";
+
+                if (_field == Field.Skills && i == _skillSelectedIndex)
+                {
+                    AnsiConsole.SetReverse();
+                    AnsiConsole.WriteAt(_box.InnerTop + row, _box.InnerLeft, skillText.PadRight(_box.InnerWidth));
+                    AnsiConsole.ResetStyle();
+                }
+                else
+                {
+                    AnsiConsole.WriteAt(_box.InnerTop + row, _box.InnerLeft, skillText.PadRight(_box.InnerWidth));
+                }
+                row++;
+            }
+
+            // Scroll indicator
+            if (_skillItems.Count > maxSkillRows && row < _box.InnerHeight - 3)
+            {
+                var indicator = $"  ({_skillItems.Count(_s => _s.Enabled)} of {_skillItems.Count} enabled)";
+                AnsiConsole.SetDim();
+                AnsiConsole.WriteAt(_box.InnerTop + row, _box.InnerLeft, indicator.PadRight(_box.InnerWidth));
+                AnsiConsole.ResetStyle();
+                row++;
+            }
         }
         row++;
 
@@ -200,9 +276,12 @@ public class BotUpdateFlow : IModal
         if (_statusText.Length > 0)
             DialogRunner.DrawStatus(_box, _statusText, _statusColor);
 
-        var hints = _field == Field.Steps
-            ? " Tab:Fields  A:Add  D:Del  Enter:Save  Esc:Cancel "
-            : " Tab:Next  Enter:Save  Esc:Cancel ";
+        var hints = _field switch
+        {
+            Field.Skills => " Tab:Fields  Space:Toggle  Enter:Save  Esc:Cancel ",
+            Field.Steps => " Tab:Fields  A:Add  D:Del  Enter:Save  Esc:Cancel ",
+            _ => " Tab:Next  Enter:Save  Esc:Cancel "
+        };
         DialogRunner.DrawButtonHints(_box, hints);
 
         // Cursor
@@ -221,6 +300,7 @@ public class BotUpdateFlow : IModal
                     AnsiConsole.MoveTo(_box.InnerTop + 7, _box.InnerLeft + _personaCursor);
                     break;
                 case Field.Schedule:
+                case Field.Skills:
                 case Field.Steps:
                     AnsiConsole.HideCursor();
                     break;
@@ -263,8 +343,9 @@ public class BotUpdateFlow : IModal
                 Field.Goal => Field.Persona,
                 Field.Persona => Field.Schedule,
                 Field.Schedule when ScheduleOptions[_scheduleIndex].Type == BotScheduleType.Interval => Field.IntervalInput,
-                Field.Schedule => Field.Steps,
-                Field.IntervalInput => Field.Steps,
+                Field.Schedule => Field.Skills,
+                Field.IntervalInput => Field.Skills,
+                Field.Skills => Field.Steps,
                 Field.Steps => Field.Label,
                 _ => Field.Label
             };
@@ -274,7 +355,7 @@ public class BotUpdateFlow : IModal
         }
 
         // Enter to save (from non-list fields)
-        if (key.Key == ConsoleKey.Enter && _field != Field.Schedule && _field != Field.Steps)
+        if (key.Key == ConsoleKey.Enter && _field != Field.Schedule && _field != Field.Skills && _field != Field.Steps)
         {
             SaveBot();
             return;
@@ -287,6 +368,7 @@ public class BotUpdateFlow : IModal
             case Field.Persona: HandleTextInput(key, _personaBuffer, ref _personaCursor); break;
             case Field.Schedule: HandleScheduleInput(key); break;
             case Field.IntervalInput: HandleIntervalInput(key); break;
+            case Field.Skills: HandleSkillsInput(key); break;
             case Field.Steps: HandleStepsInput(key); break;
         }
     }
@@ -314,7 +396,7 @@ public class BotUpdateFlow : IModal
                 }
                 else
                 {
-                    _field = Field.Steps;
+                    _field = Field.Skills;
                 }
                 Draw();
                 AnsiConsole.Flush();
@@ -326,7 +408,7 @@ public class BotUpdateFlow : IModal
     {
         if (key.Key == ConsoleKey.Enter)
         {
-            _field = Field.Steps;
+            _field = Field.Skills;
             Draw();
             AnsiConsole.Flush();
             return;
@@ -342,6 +424,31 @@ public class BotUpdateFlow : IModal
         else
         {
             HandleTextInput(key, _intervalBuffer, ref _intervalCursor);
+        }
+    }
+
+    private void HandleSkillsInput(ConsoleKeyInfo key)
+    {
+        switch (key.Key)
+        {
+            case ConsoleKey.UpArrow:
+                if (_skillSelectedIndex > 0) { _skillSelectedIndex--; Draw(); AnsiConsole.Flush(); }
+                break;
+            case ConsoleKey.DownArrow:
+                if (_skillSelectedIndex < _skillItems.Count - 1) { _skillSelectedIndex++; Draw(); AnsiConsole.Flush(); }
+                break;
+            case ConsoleKey.Spacebar:
+                if (_skillItems.Count > 0 && _skillSelectedIndex < _skillItems.Count)
+                {
+                    var item = _skillItems[_skillSelectedIndex];
+                    _skillItems[_skillSelectedIndex] = (item.Id, item.Name, !item.Enabled);
+                    Draw();
+                    AnsiConsole.Flush();
+                }
+                break;
+            case ConsoleKey.Enter:
+                SaveBot();
+                break;
         }
     }
 
@@ -486,6 +593,12 @@ public class BotUpdateFlow : IModal
                 _bot.Persona = _personaBuffer.Length > 0 ? _personaBuffer.ToString().Trim() : null;
                 _bot.ScheduleType = scheduleType;
                 _bot.ScheduleIntervalMinutes = intervalMinutes;
+
+                // Save selected skills
+                var enabledIds = _skillItems
+                    .Where(s => s.Enabled)
+                    .Select(s => s.Id);
+                _bot.SetEnabledSkillIds(enabledIds);
 
                 await _botStore.UpdateAsync(_bot);
 
