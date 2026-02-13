@@ -204,6 +204,11 @@ public class BotEngine : IBotEngine, IDisposable
 
         var settings = await _settingsService.GetSettingsAsync();
 
+        // Load memories for this bot
+        List<BotMemoryEntry> memories = [];
+        if (bot.MemoryEnabled)
+            memories = await _botStore.GetMemoriesAsync(botId, bot.MaxMemoryEntries);
+
         // Open log file for this run if file logging is enabled
         if (settings.BotFileLoggingEnabled)
         {
@@ -296,11 +301,15 @@ public class BotEngine : IBotEngine, IDisposable
                 $"Using {persistedSteps.Count} user-defined steps");
         }
 
-        var plan = prebuiltPlan ?? await CreatePlanAsync(bot, settings, userInstructions, ct);
+        var plan = prebuiltPlan ?? await CreatePlanAsync(bot, settings, userInstructions, memories, ct);
         if (plan is null)
         {
             await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Warning, "Could not create plan, executing goal directly");
-            await ExecuteDirectAsync(bot, settings, userInstructions, ct);
+            var directResult = await ExecuteDirectAsync(bot, settings, userInstructions, memories, ct);
+
+            // Extract memories after direct execution
+            if (bot.MemoryEnabled && !string.IsNullOrWhiteSpace(directResult))
+                await ExtractAndStoreMemoriesAsync(bot, settings, directResult, ct);
         }
         else
         {
@@ -313,7 +322,11 @@ public class BotEngine : IBotEngine, IDisposable
             FireActionPlanChanged(botId, plan);
 
             // Step 3: Execute plan steps + synthesize
-            await ExecutePlanStepsAsync(bot, plan, settings, userInstructions, ct);
+            var synthesisResult = await ExecutePlanStepsAsync(bot, plan, settings, userInstructions, memories, ct);
+
+            // Extract memories after synthesis
+            if (bot.MemoryEnabled && !string.IsNullOrWhiteSpace(synthesisResult))
+                await ExtractAndStoreMemoriesAsync(bot, settings, synthesisResult, ct);
         }
 
         // Reschedule
@@ -362,7 +375,7 @@ public class BotEngine : IBotEngine, IDisposable
 
     private async Task<ActionPlan?> CreatePlanAsync(
         BotInstance bot, UserSettings settings,
-        List<string> userInstructions, CancellationToken ct)
+        List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
     {
         const int maxAttempts = 3;
 
@@ -374,7 +387,7 @@ public class BotEngine : IBotEngine, IDisposable
                 var planRequest = new CreateInferenceRequest
                 {
                     ModelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName,
-                    InitializationPrompt = BuildBotPlanningPrompt(bot, userInstructions),
+                    InitializationPrompt = BuildBotPlanningPrompt(bot, userInstructions, memories),
                     ThinkLevel = ThinkLevels.Basic
                 };
 
@@ -446,9 +459,9 @@ public class BotEngine : IBotEngine, IDisposable
         return null;
     }
 
-    private async Task ExecutePlanStepsAsync(
+    private async Task<string?> ExecutePlanStepsAsync(
         BotInstance bot, ActionPlan plan,
-        UserSettings settings, List<string> userInstructions, CancellationToken ct)
+        UserSettings settings, List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
     {
         const int maxAttempts = 3;
         var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
@@ -458,7 +471,7 @@ public class BotEngine : IBotEngine, IDisposable
         var execRequest = new CreateInferenceRequest
         {
             ModelName = modelName,
-            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
+            InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions, memories),
             ThinkLevel = ThinkLevels.BasicWithTools
         };
         foreach (var group in settings.GetEnabledToolGroups())
@@ -577,6 +590,7 @@ public class BotEngine : IBotEngine, IDisposable
         }
 
         // Synthesis with a fresh client (with retry)
+        string? synthesisResult = null;
         if (stepResults.Count > 0 && !ct.IsCancellationRequested)
         {
             await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.StepStart, "Synthesizing results...");
@@ -624,6 +638,7 @@ public class BotEngine : IBotEngine, IDisposable
                         break;
                     }
 
+                    synthesisResult = synthResult;
                     await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
                         "Summary: " + synthResult);
                     break; // success
@@ -646,11 +661,13 @@ public class BotEngine : IBotEngine, IDisposable
                 }
             }
         }
+
+        return synthesisResult;
     }
 
-    private async Task ExecuteDirectAsync(
+    private async Task<string?> ExecuteDirectAsync(
         BotInstance bot, UserSettings settings,
-        List<string> userInstructions, CancellationToken ct)
+        List<string> userInstructions, List<BotMemoryEntry> memories, CancellationToken ct)
     {
         const int maxAttempts = 3;
         var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
@@ -663,7 +680,7 @@ public class BotEngine : IBotEngine, IDisposable
                 var createRequest = new CreateInferenceRequest
                 {
                     ModelName = modelName,
-                    InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions),
+                    InitializationPrompt = BuildBotExecutionPrompt(bot, userInstructions, memories),
                     ThinkLevel = ThinkLevels.BasicWithTools
                 };
                 foreach (var group in settings.GetEnabledToolGroups())
@@ -706,12 +723,12 @@ public class BotEngine : IBotEngine, IDisposable
                     }
                     await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
                         $"Direct inference returned empty after {maxAttempts} attempts");
-                    return;
+                    return null;
                 }
 
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
                     "Result", directResult);
-                return; // success
+                return directResult;
             }
             catch (Exception ex)
             {
@@ -728,6 +745,87 @@ public class BotEngine : IBotEngine, IDisposable
             {
                 try { await client.CloseAsync(); } catch { }
             }
+        }
+
+        return null;
+    }
+
+    private async Task ExtractAndStoreMemoriesAsync(
+        BotInstance bot, UserSettings settings, string cycleOutput, CancellationToken ct)
+    {
+        try
+        {
+            var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
+            var client = CreateInferenceClient();
+            try
+            {
+                var request = new CreateInferenceRequest
+                {
+                    ModelName = modelName,
+                    InitializationPrompt = "You are a memory extraction assistant. Given a bot's execution output, extract key facts worth remembering for future runs.",
+                    ThinkLevel = ThinkLevels.Basic
+                };
+                await client.CreateAsync(request);
+
+                var sendRequest = SendInferenceRequest.CreateDefault();
+                sendRequest.Text = $"""
+                    Bot goal: {bot.Goal}
+                    Execution #{bot.ExecutionCount} output:
+                    {cycleOutput}
+
+                    Extract the key facts worth remembering for future executions. Focus on:
+                    - Specific outputs produced (so they are not repeated)
+                    - Decisions made or approaches taken
+                    - User preferences or feedback discovered
+                    - Items to avoid repeating next time
+
+                    Output one fact per line, no numbering, no bullets, no blank lines.
+                    If there is nothing worth remembering, output exactly: NONE
+                    """;
+                sendRequest.Temperature = 0.2f;
+                sendRequest.MaxTokens = 512;
+                sendRequest.ThinkLevel = ThinkLevels.Basic;
+
+                var content = new StringBuilder();
+                var stream = client.Send(sendRequest);
+                while (await stream.ResponseStream.MoveNext(ct))
+                {
+                    var chunk = stream.ResponseStream.Current;
+                    if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
+                        content.Append(chunk.Content);
+                }
+
+                var raw = content.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var facts = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var fact in facts)
+                {
+                    if (string.IsNullOrWhiteSpace(fact) || fact.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    await _botStore.AddMemoryAsync(new BotMemoryEntry
+                    {
+                        BotId = bot.Id,
+                        ExecutionNumber = bot.ExecutionCount,
+                        Content = fact
+                    });
+                }
+
+                await _botStore.PruneMemoryAsync(bot.Id, bot.MaxMemoryEntries);
+
+                await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info,
+                    $"Memory updated ({facts.Length} fact{(facts.Length == 1 ? "" : "s")} extracted)");
+            }
+            finally
+            {
+                try { await client.CloseAsync(); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Memory extraction failed for bot {BotId} — this is non-fatal", bot.Id);
         }
     }
 
@@ -884,13 +982,21 @@ public class BotEngine : IBotEngine, IDisposable
         return factory.Create();
     }
 
-    private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null)
+    private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null, List<BotMemoryEntry>? memories = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot task planner.");
         if (!string.IsNullOrWhiteSpace(bot.Persona))
             sb.AppendLine($"Persona: {bot.Persona}");
         sb.AppendLine();
+
+        if (memories is { Count: > 0 })
+        {
+            sb.AppendLine("MEMORY — Important context from previous executions (do NOT repeat previous outputs):");
+            foreach (var m in memories)
+                sb.AppendLine($"- [Run #{m.ExecutionNumber}] {m.Content}");
+            sb.AppendLine();
+        }
 
         if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
         {
@@ -934,13 +1040,21 @@ public class BotEngine : IBotEngine, IDisposable
         return sb.ToString();
     }
 
-    private static string BuildBotExecutionPrompt(BotInstance bot, List<string>? userInstructions = null)
+    private static string BuildBotExecutionPrompt(BotInstance bot, List<string>? userInstructions = null, List<BotMemoryEntry>? memories = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are an autonomous bot executing a task.");
         if (!string.IsNullOrWhiteSpace(bot.Persona))
             sb.AppendLine($"Persona: {bot.Persona}");
         sb.AppendLine($"Goal: {bot.Goal}");
+
+        if (memories is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("MEMORY — Important context from previous executions (do NOT repeat previous outputs):");
+            foreach (var m in memories)
+                sb.AppendLine($"- [Run #{m.ExecutionNumber}] {m.Content}");
+        }
 
         if (!string.IsNullOrWhiteSpace(bot.RetryGuidance))
         {

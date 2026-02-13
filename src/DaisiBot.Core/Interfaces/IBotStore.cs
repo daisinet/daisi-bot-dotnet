@@ -15,4 +15,8 @@ public interface IBotStore
     Task ClearLogAsync(Guid botId);
     Task<List<BotStep>> GetStepsAsync(Guid botId);
     Task SetStepsAsync(Guid botId, List<BotStep> steps);
+    Task AddMemoryAsync(BotMemoryEntry entry);
+    Task<List<BotMemoryEntry>> GetMemoriesAsync(Guid botId, int limit = 50);
+    Task ClearMemoryAsync(Guid botId);
+    Task PruneMemoryAsync(Guid botId, int maxEntries);
 }
