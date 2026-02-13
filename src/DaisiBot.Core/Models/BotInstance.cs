@@ -27,6 +27,10 @@ public class BotInstance
     public string? PendingQuestion { get; set; }
     public int ExecutionCount { get; set; }
 
+    // Memory
+    public bool MemoryEnabled { get; set; } = true;
+    public int MaxMemoryEntries { get; set; } = 50;
+
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

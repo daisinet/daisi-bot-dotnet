@@ -30,6 +30,8 @@
                              Min="1" Class="mb-3" Variant="Variant.Outlined" />
         }
 
+        <MudSwitch @bind-Value="_memoryEnabled" Label="Memory Enabled" Color="Color.Primary" Class="mb-3" />
+
         <MudRadioGroup @bind-Value="_startImmediately">
             <MudRadio Value="true" Color="Color.Primary">Run immediately</MudRadio>
             <MudRadio Value="false" Color="Color.Default">Create only (start later)</MudRadio>
@@ -50,6 +52,7 @@
     private string? _persona;
     private BotScheduleType _scheduleType = BotScheduleType.Once;
     private int _intervalMinutes = 60;
+    private bool _memoryEnabled = true;
     private bool _startImmediately = true;
 
     private void Cancel() => MudDialog.Cancel();
@@ -67,6 +70,7 @@
             Persona = string.IsNullOrWhiteSpace(_persona) ? null : _persona,
             ScheduleType = _scheduleType,
             ScheduleIntervalMinutes = _scheduleType == BotScheduleType.Interval ? _intervalMinutes : 0,
+            MemoryEnabled = _memoryEnabled,
             Status = BotStatus.Idle
         };
 

@@ -18,6 +18,7 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
     public DbSet<BotInstance> Bots => Set<BotInstance>();
     public DbSet<BotLogEntry> BotLogEntries => Set<BotLogEntry>();
     public DbSet<BotStep> BotSteps => Set<BotStep>();
+    public DbSet<BotMemoryEntry> BotMemoryEntries => Set<BotMemoryEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +79,12 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         {
             e.HasKey(s => s.Id);
             e.HasIndex(s => s.BotId);
+        });
+
+        modelBuilder.Entity<BotMemoryEntry>(e =>
+        {
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => m.BotId);
         });
     }
 
@@ -193,6 +200,8 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
                     EnabledSkillIdsCsv TEXT NOT NULL DEFAULT '',
                     PendingQuestion TEXT,
                     ExecutionCount INTEGER NOT NULL DEFAULT 0,
+                    MemoryEnabled INTEGER NOT NULL DEFAULT 1,
+                    MaxMemoryEntries INTEGER NOT NULL DEFAULT 50,
                     CreatedAt TEXT NOT NULL,
                     UpdatedAt TEXT NOT NULL,
                     LastRunAt TEXT
@@ -261,6 +270,42 @@ public class DaisiBotDbContext(DbContextOptions<DaisiBotDbContext> options) : Db
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "ALTER TABLE Bots ADD COLUMN RetryGuidance TEXT";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        if (!botColumns.Contains("MemoryEnabled"))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "ALTER TABLE Bots ADD COLUMN MemoryEnabled INTEGER NOT NULL DEFAULT 1";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        if (!botColumns.Contains("MaxMemoryEntries"))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "ALTER TABLE Bots ADD COLUMN MaxMemoryEntries INTEGER NOT NULL DEFAULT 50";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Ensure BotMemoryEntries table exists
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS BotMemoryEntries (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    BotId TEXT NOT NULL,
+                    ExecutionNumber INTEGER NOT NULL DEFAULT 0,
+                    Content TEXT NOT NULL DEFAULT '',
+                    CreatedAt TEXT NOT NULL
+                )
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Index on BotMemoryEntries.BotId
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_BotMemoryEntries_BotId ON BotMemoryEntries (BotId)";
             await cmd.ExecuteNonQueryAsync();
         }
     }

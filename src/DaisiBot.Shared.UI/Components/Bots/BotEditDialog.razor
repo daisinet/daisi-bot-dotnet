@@ -42,6 +42,13 @@
         }
         <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Add" OnClick="AddStep" Class="mb-3">Add Step</MudButton>
+
+        <MudSwitch @bind-Value="_memoryEnabled" Label="Memory Enabled" Color="Color.Primary" Class="mb-3" />
+        @if (_memoryEnabled)
+        {
+            <MudNumericField @bind-Value="_maxMemoryEntries" Label="Max Memory Entries"
+                             Min="5" Max="200" Class="mb-3" Variant="Variant.Outlined" />
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -60,6 +67,8 @@
     private BotScheduleType _scheduleType = BotScheduleType.Once;
     private int _intervalMinutes = 60;
     private List<string> _steps = [];
+    private bool _memoryEnabled = true;
+    private int _maxMemoryEntries = 50;
 
     protected override async Task OnInitializedAsync()
     {
@@ -68,6 +77,8 @@
         _persona = Bot.Persona;
         _scheduleType = Bot.ScheduleType;
         _intervalMinutes = Bot.ScheduleIntervalMinutes > 0 ? Bot.ScheduleIntervalMinutes : 60;
+        _memoryEnabled = Bot.MemoryEnabled;
+        _maxMemoryEntries = Bot.MaxMemoryEntries;
 
         var steps = await BotStore.GetStepsAsync(Bot.Id);
         _steps = steps.Select(s => s.Description).ToList();
@@ -96,6 +107,8 @@
         Bot.Persona = string.IsNullOrWhiteSpace(_persona) ? null : _persona;
         Bot.ScheduleType = _scheduleType;
         Bot.ScheduleIntervalMinutes = _scheduleType == BotScheduleType.Interval ? _intervalMinutes : 0;
+        Bot.MemoryEnabled = _memoryEnabled;
+        Bot.MaxMemoryEntries = _maxMemoryEntries;
 
         await BotStore.UpdateAsync(Bot);
 
