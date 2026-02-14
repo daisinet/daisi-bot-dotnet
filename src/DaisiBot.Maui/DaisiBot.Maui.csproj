@@ -54,6 +54,8 @@
     <ProjectReference Include="..\DaisiBot.Agent\DaisiBot.Agent.csproj" />
     <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
     <ProjectReference Include="..\DaisiBot.Shared.UI\DaisiBot.Shared.UI.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference\Daisi.Inference.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference.LlamaSharp\Daisi.Inference.LlamaSharp.csproj" />
   </ItemGroup>
 
 </Project>

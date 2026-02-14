@@ -1,5 +1,8 @@
 using Daisi.Host.Core.Services;
 using Daisi.Host.Core.Services.Interfaces;
+using Daisi.Inference.Interfaces;
+using Daisi.Inference.LlamaSharp;
+using Daisi.Inference.Models;
 using Daisi.SDK.Models;
 using DaisiBot.Agent.Auth;
 using DaisiBot.Agent.Extensions;
@@ -15,7 +18,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-using LLama.Native;
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -23,8 +25,17 @@ var builder = Host.CreateApplicationBuilder(args);
 // Suppress all console logging — we own the terminal
 builder.Logging.ClearProviders();
 
-// Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
-NativeLibraryConfig.All.WithLogCallback((level, message) => { });
+// Register LlamaSharp backend with log suppression
+builder.Services.AddSingleton<ITextInferenceBackend>(sp =>
+{
+    var backend = new LlamaSharpTextBackend();
+    // Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
+    backend.ConfigureAsync(new BackendConfiguration
+    {
+        LogCallback = (_, _) => { }
+    }).GetAwaiter().GetResult();
+    return backend;
+});
 
 // Configure DAISI network
 DaisiStaticSettings.AutoswapOrc();
