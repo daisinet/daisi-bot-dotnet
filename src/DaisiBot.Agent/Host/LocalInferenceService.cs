@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Daisi.Host.Core.Models;
 using Daisi.Host.Core.Services;
 using Daisi.Protos.V1;
+using Daisi.SDK.Clients.V1.Orc;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -17,6 +19,8 @@ public class LocalInferenceService : ILocalInferenceService
     private readonly ToolService _toolService;
     private readonly HostSettingsService _settingsService;
     private readonly ISettingsService _userSettingsService;
+    private readonly HostClientFactory _hostClientFactory;
+    private readonly IAuthService _authService;
     private readonly ILogger<LocalInferenceService> _logger;
     private bool _initialized;
 
@@ -28,6 +32,8 @@ public class LocalInferenceService : ILocalInferenceService
         ToolService toolService,
         HostSettingsService settingsService,
         ISettingsService userSettingsService,
+        HostClientFactory hostClientFactory,
+        IAuthService authService,
         ILogger<LocalInferenceService> logger)
     {
         _modelService = modelService;
@@ -35,6 +41,8 @@ public class LocalInferenceService : ILocalInferenceService
         _toolService = toolService;
         _settingsService = settingsService;
         _userSettingsService = userSettingsService;
+        _hostClientFactory = hostClientFactory;
+        _authService = authService;
         _logger = logger;
     }
 
@@ -46,6 +54,7 @@ public class LocalInferenceService : ILocalInferenceService
         {
             await _settingsService.LoadAsync();
             await SyncUserModelPathAsync();
+            await EnsureHostRegisteredAsync();
             _toolService.LoadTools();
             _toolService.LoadToolsFromAssembly(typeof(DaisiBot.LocalTools.Shell.ShellExecuteTool).Assembly);
             _modelService.LoadModels();
@@ -55,6 +64,42 @@ public class LocalInferenceService : ILocalInferenceService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to initialize local inference");
+        }
+    }
+
+    private async Task EnsureHostRegisteredAsync()
+    {
+        try
+        {
+            var authState = await _authService.GetAuthStateAsync();
+            if (!authState.IsAuthenticated)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(_settingsService.Settings.Host?.SecretKey))
+                return;
+
+            var hostClient = _hostClientFactory.Create();
+            var response = await hostClient.RegisterAsync(new RegisterHostRequest
+            {
+                Host = new Daisi.Protos.V1.Host
+                {
+                    Name = Environment.MachineName,
+                    Port = 0,
+                    Region = "USSouthEast",
+                    OperatingSystem = RuntimeInformation.OSDescription,
+                    OperatingSystemVersion = Environment.OSVersion.VersionString
+                }
+            });
+
+            _settingsService.Settings.Host.SecretKey = response.SecretKey;
+            _settingsService.Settings.Host.Id = response.HostId;
+            await _settingsService.SaveAsync();
+
+            _logger.LogInformation("Auto-registered as host {HostId}", response.HostId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-register as host");
         }
     }
 
