@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Daisi.Host.Core.Models;
 using Daisi.Host.Core.Services;
 using Daisi.Protos.V1;
 using DaisiBot.Core.Interfaces;
@@ -79,7 +80,22 @@ public class LocalInferenceService : ILocalInferenceService
             var missing = new List<ModelDownloadInfo>();
             foreach (var m in requiredModels)
             {
-                if (!existingFiles.Contains(m.FileName))
+                bool needsDownload = !existingFiles.Contains(m.FileName);
+
+                // Validate existing files — treat corrupt files as missing
+                if (!needsDownload)
+                {
+                    var filePath = Path.Combine(modelPath, m.FileName);
+                    var error = LocalModel.ValidateGgufFile(filePath);
+                    if (error is not null)
+                    {
+                        _logger.LogWarning("Model '{Name}' is invalid ({Error}) — flagging for re-download", m.Name, error);
+                        try { File.Delete(filePath); } catch { /* best effort */ }
+                        needsDownload = true;
+                    }
+                }
+
+                if (needsDownload)
                 {
                     missing.Add(new ModelDownloadInfo
                     {
