@@ -1,3 +1,4 @@
+using System.Reflection;
 using Daisi.Protos.V1;
 using Daisi.SDK.Clients.V1.Orc;
 using DaisiBot.Core.Interfaces;
@@ -14,6 +15,7 @@ public class DaisiBotAuthService : IAuthService
     private AuthState _currentState = new();
 
     public string AppId { get; set; } = "app-260209122215-qakyd";
+    public string BotPlatform { get; set; } = "unknown";
 
     public event EventHandler<AuthState>? AuthStateChanged;
 
@@ -53,7 +55,9 @@ public class DaisiBotAuthService : IAuthService
         {
             EmailOrPhone = emailOrPhone,
             AuthCode = code,
-            AppId = AppId
+            AppId = AppId,
+            BotVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(),
+            BotPlatform = BotPlatform
         };
 
         var response = await client.ValidateAuthCodeAsync(request);

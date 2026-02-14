@@ -10,13 +10,23 @@ using DaisiBot.Data;
 using DaisiBot.Tui;
 using DaisiBot.Tui.Dialogs;
 using DaisiBot.Tui.Screens;
+using DaisiBot.Tui.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Velopack;
 
 using LLama.Native;
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
+
+VelopackApp.Build()
+    .OnAfterInstallFastCallback(v => VelopackInstallHooks.OnAfterInstall(v))
+    .OnAfterUpdateFastCallback(v => VelopackInstallHooks.OnAfterUpdate(v))
+    .OnBeforeUninstallFastCallback(v => VelopackInstallHooks.OnBeforeUninstall(v))
+    .Run();
+
+VelopackUpdateService.ShowVersionNumber();
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -25,6 +35,11 @@ builder.Logging.ClearProviders();
 
 // Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
 NativeLibraryConfig.All.WithLogCallback((level, message) => { });
+
+// Add app-local runtimes to native library search path (bundled in Velopack package)
+var appRuntimesPath = Path.Combine(AppContext.BaseDirectory, "runtimes");
+if (Directory.Exists(appRuntimesPath))
+    NativeLibraryConfig.All.WithSearchDirectory(appRuntimesPath);
 
 // Configure DAISI network
 DaisiStaticSettings.AutoswapOrc();
@@ -72,6 +87,7 @@ using (var scope = host.Services.CreateScope())
 
 // Initialize auth
 var authService = host.Services.GetRequiredService<DaisiBotAuthService>();
+authService.BotPlatform = "tui";
 await authService.InitializeAsync();
 #if DEBUG
 {
