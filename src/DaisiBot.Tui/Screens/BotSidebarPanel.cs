@@ -92,6 +92,8 @@ public class BotSidebarPanel
 
     public void Draw()
     {
+        if (Width < 3 || Height < 3) return; // Not yet laid out
+
         var contentWidth = Width - 2;
 
         // Title

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Daisi.Protos.V1;
@@ -12,6 +13,7 @@ using DaisiBot.Agent.Skills;
 using DaisiBot.Core.Enums;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
 
 namespace DaisiBot.Agent.Bots;
@@ -25,12 +27,14 @@ public class BotEngine : IBotEngine, IDisposable
     private readonly DaisiBotClientKeyProvider _keyProvider;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<BotEngine> _logger;
+    private readonly ILocalInferenceService? _localInference;
     private readonly ConcurrentDictionary<Guid, BotRuntime> _runtimes = new();
     private readonly Timer _schedulerTimer;
 
     public event EventHandler<BotInstance>? BotStatusChanged;
     public event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
     public event EventHandler<BotLogEntry>? BotLogEntryAdded;
+    public event EventHandler<Guid>? AuthenticationRequired;
 
     public BotEngine(
         IBotStore botStore,
@@ -38,7 +42,8 @@ public class BotEngine : IBotEngine, IDisposable
         ISkillService skillService,
         ISkillFileLoader skillFileLoader,
         DaisiBotClientKeyProvider keyProvider,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        ILocalInferenceService? localInference = null)
     {
         _botStore = botStore;
         _settingsService = settingsService;
@@ -47,6 +52,7 @@ public class BotEngine : IBotEngine, IDisposable
         _keyProvider = keyProvider;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<BotEngine>();
+        _localInference = localInference;
 
         _schedulerTimer = new Timer(OnSchedulerTick, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(30));
     }
@@ -381,7 +387,7 @@ public class BotEngine : IBotEngine, IDisposable
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var client = CreateInferenceClient();
+            var client = CreateBotSession(settings);
             try
             {
                 var planRequest = new CreateInferenceRequest
@@ -401,10 +407,8 @@ public class BotEngine : IBotEngine, IDisposable
                 sendRequest.ExampleOutput = "<plan>\n<goal>Summarize today's headlines</goal>\n<step>Search for today's top news stories</step>\n<step>Read and extract key points from each story</step>\n<step>Compile a concise summary of the headlines</step>\n</plan>";
 
                 var content = new StringBuilder();
-                var stream = client.Send(sendRequest);
-                while (await stream.ResponseStream.MoveNext(ct))
+                await foreach (var chunk in client.SendAsync(sendRequest, ct))
                 {
-                    var chunk = stream.ResponseStream.Current;
                     if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
                         content.Append(chunk.Content);
                 }
@@ -435,24 +439,30 @@ public class BotEngine : IBotEngine, IDisposable
                         raw.Length > 500 ? raw[..500] + "..." : raw);
                     plan = PlanParser.ParseFallback(raw, bot.Goal);
                 }
+                // Fill in goal from bot if parser didn't find one
+                if (plan is not null && string.IsNullOrWhiteSpace(plan.Goal))
+                    plan.Goal = bot.Goal;
                 return plan;
             }
             catch (Exception ex)
             {
+                if (IsAuthenticationError(ex)) throw; // bubble up to HandleBotFailureAsync
+                var rootMsg = GetRootMessage(ex);
                 if (attempt < maxAttempts)
                 {
                     await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
-                        $"Plan inference error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                        $"Plan inference error (attempt {attempt}/{maxAttempts}): {rootMsg} \u2014 retrying...");
                     continue;
                 }
                 _logger.LogWarning(ex, "Planning failed for bot {BotId}", bot.Id);
+                DiagLog($"Bot {bot.Id} planning failed: {UnwrapException(ex)}");
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
-                    $"Planning failed after {maxAttempts} attempts: {ex.Message}");
+                    $"Planning failed after {maxAttempts} attempts: {rootMsg}");
                 return null;
             }
             finally
             {
-                try { await client.CloseAsync(); } catch { }
+                await client.DisposeAsync();
             }
         }
 
@@ -478,7 +488,7 @@ public class BotEngine : IBotEngine, IDisposable
             execRequest.ToolGroups.Add(EnumMapper.ToProtoToolGroup(group));
 
         // Execute steps — client is recreated on retry
-        var execClient = CreateInferenceClient();
+        var execClient = CreateBotSession(settings);
         try
         {
             await execClient.CreateAsync(execRequest);
@@ -501,8 +511,8 @@ public class BotEngine : IBotEngine, IDisposable
                     {
                         if (attempt > 1)
                         {
-                            try { await execClient.CloseAsync(); } catch { }
-                            execClient = CreateInferenceClient();
+                            await execClient.DisposeAsync();
+                            execClient = CreateBotSession(settings);
                             await execClient.CreateAsync(execRequest);
                         }
 
@@ -515,10 +525,8 @@ public class BotEngine : IBotEngine, IDisposable
 
                         var toolsUsed = new List<string>();
                         await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info, "Waiting for inference...");
-                        var stream = execClient.Send(sendRequest);
-                        while (await stream.ResponseStream.MoveNext(ct))
+                        await foreach (var chunk in execClient.SendAsync(sendRequest, ct))
                         {
-                            var chunk = stream.ResponseStream.Current;
                             if (chunk.Type == InferenceResponseTypes.Tooling)
                             {
                                 toolsUsed.Add(chunk.Content);
@@ -565,28 +573,31 @@ public class BotEngine : IBotEngine, IDisposable
                     }
                     catch (Exception ex)
                     {
+                        if (IsAuthenticationError(ex)) throw; // bubble up to HandleBotFailureAsync
+                        var rootMsg = GetRootMessage(ex);
                         if (attempt < maxAttempts)
                         {
                             await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
-                                $"Step {step.StepNumber} error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                                $"Step {step.StepNumber} error (attempt {attempt}/{maxAttempts}): {rootMsg} \u2014 retrying...");
                             continue;
                         }
 
                         step.Status = ActionItemStatus.Failed;
-                        step.Error = ex.Message;
-                        stepResults.Add($"Step {step.StepNumber} failed: {ex.Message}");
+                        step.Error = rootMsg;
+                        stepResults.Add($"Step {step.StepNumber} failed: {rootMsg}");
 
                         FireActionPlanChanged(bot.Id, plan);
 
+                        DiagLog($"Bot {bot.Id} step {step.StepNumber} failed: {UnwrapException(ex)}");
                         await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
-                            $"Step {step.StepNumber} failed after {maxAttempts} attempts: {ex.Message}");
+                            $"Step {step.StepNumber} failed after {maxAttempts} attempts: {rootMsg}");
                     }
                 }
             }
         }
         finally
         {
-            try { await execClient.CloseAsync(); } catch { }
+            await execClient.DisposeAsync();
         }
 
         // Synthesis with a fresh client (with retry)
@@ -597,7 +608,7 @@ public class BotEngine : IBotEngine, IDisposable
 
             for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var synthClient = CreateInferenceClient();
+                var synthClient = CreateBotSession(settings);
                 try
                 {
                     var synthRequest = new CreateInferenceRequest
@@ -614,10 +625,10 @@ public class BotEngine : IBotEngine, IDisposable
                     synthSend.MaxTokens = bot.MaxTokens;
 
                     var synthContent = new StringBuilder();
-                    var synthStream = synthClient.Send(synthSend);
-                    while (await synthStream.ResponseStream.MoveNext(ct))
+                    await foreach (var chunk in synthClient.SendAsync(synthSend, ct))
                     {
-                        synthContent.Append(synthStream.ResponseStream.Current.Content);
+                        if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
+                            synthContent.Append(chunk.Content);
                     }
 
                     var synthResult = synthContent.ToString().Trim();
@@ -645,19 +656,21 @@ public class BotEngine : IBotEngine, IDisposable
                 }
                 catch (Exception ex)
                 {
+                    if (IsAuthenticationError(ex)) throw; // bubble up to HandleBotFailureAsync
+                    var rootMsg = GetRootMessage(ex);
                     if (attempt < maxAttempts)
                     {
                         await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
-                            $"Synthesis error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                            $"Synthesis error (attempt {attempt}/{maxAttempts}): {rootMsg} \u2014 retrying...");
                         continue;
                     }
                     _logger.LogWarning(ex, "Synthesis failed for bot {BotId}", bot.Id);
                     await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
-                        $"Synthesis failed after {maxAttempts} attempts: {ex.Message}");
+                        $"Synthesis failed after {maxAttempts} attempts: {rootMsg}");
                 }
                 finally
                 {
-                    try { await synthClient.CloseAsync(); } catch { }
+                    await synthClient.DisposeAsync();
                 }
             }
         }
@@ -674,7 +687,7 @@ public class BotEngine : IBotEngine, IDisposable
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var client = CreateInferenceClient();
+            var client = CreateBotSession(settings);
             try
             {
                 var createRequest = new CreateInferenceRequest
@@ -696,10 +709,8 @@ public class BotEngine : IBotEngine, IDisposable
 
                 var content = new StringBuilder();
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Info, "Waiting for inference...");
-                var stream = client.Send(sendRequest);
-                while (await stream.ResponseStream.MoveNext(ct))
+                await foreach (var chunk in client.SendAsync(sendRequest, ct))
                 {
-                    var chunk = stream.ResponseStream.Current;
                     if (chunk.Type == InferenceResponseTypes.Tooling)
                     {
                         await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.SkillAction, chunk.Content);
@@ -732,18 +743,21 @@ public class BotEngine : IBotEngine, IDisposable
             }
             catch (Exception ex)
             {
+                if (IsAuthenticationError(ex)) throw; // bubble up to HandleBotFailureAsync
+                var rootMsg = GetRootMessage(ex);
                 if (attempt < maxAttempts)
                 {
                     await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Warning,
-                        $"Direct inference error (attempt {attempt}/{maxAttempts}): {ex.Message} \u2014 retrying...");
+                        $"Direct inference error (attempt {attempt}/{maxAttempts}): {rootMsg} \u2014 retrying...");
                     continue;
                 }
+                DiagLog($"Bot {bot.Id} direct inference failed: {UnwrapException(ex)}");
                 await LogAsync(bot.Id, bot.ExecutionCount, BotLogLevel.Error,
-                    $"Direct inference failed after {maxAttempts} attempts: {ex.Message}");
+                    $"Direct inference failed after {maxAttempts} attempts: {rootMsg}");
             }
             finally
             {
-                try { await client.CloseAsync(); } catch { }
+                await client.DisposeAsync();
             }
         }
 
@@ -756,7 +770,7 @@ public class BotEngine : IBotEngine, IDisposable
         try
         {
             var modelName = !string.IsNullOrWhiteSpace(bot.ModelName) ? bot.ModelName : settings.DefaultModelName;
-            var client = CreateInferenceClient();
+            var client = CreateBotSession(settings);
             try
             {
                 var request = new CreateInferenceRequest
@@ -787,10 +801,8 @@ public class BotEngine : IBotEngine, IDisposable
                 sendRequest.ThinkLevel = ThinkLevels.Basic;
 
                 var content = new StringBuilder();
-                var stream = client.Send(sendRequest);
-                while (await stream.ResponseStream.MoveNext(ct))
+                await foreach (var chunk in client.SendAsync(sendRequest, ct))
                 {
-                    var chunk = stream.ResponseStream.Current;
                     if (chunk.Type is InferenceResponseTypes.Text or InferenceResponseTypes.ToolContent)
                         content.Append(chunk.Content);
                 }
@@ -820,7 +832,7 @@ public class BotEngine : IBotEngine, IDisposable
             }
             finally
             {
-                try { await client.CloseAsync(); } catch { }
+                await client.DisposeAsync();
             }
         }
         catch (Exception ex)
@@ -880,12 +892,34 @@ public class BotEngine : IBotEngine, IDisposable
         var bot = await _botStore.GetAsync(botId);
         if (bot is null) return;
 
-        bot.LastError = ex.Message;
-        bot.RetryGuidance = $"Previous attempt failed: {ex.Message}";
+        var rootMessage = GetRootMessage(ex);
+
+        // Log full exception chain for diagnostics
+        DiagLog($"Bot {botId} failed: {UnwrapException(ex)}");
+
+        // If this is a 401/Unauthenticated error, stop the bot and notify the user to re-login
+        if (IsAuthenticationError(ex))
+        {
+            bot.LastError = "Authentication failed — the ORC reports your access is unauthorized. Please log in again (F5).";
+            bot.Status = BotStatus.Stopped;
+            bot.NextRunAt = null;
+            await _botStore.UpdateAsync(bot);
+
+            await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Error,
+                "Authentication failed — the ORC reports your access is unauthorized. Please log in again (F5).");
+
+            BotStatusChanged?.Invoke(this, bot);
+            AuthenticationRequired?.Invoke(this, botId);
+            return;
+        }
+
+        bot.LastError = rootMessage;
+        bot.RetryGuidance = $"Previous attempt failed: {rootMessage}";
         ComputeRetryRun(bot);
         await _botStore.UpdateAsync(bot);
 
-        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Error, $"Execution failed: {ex.Message}");
+        await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Error, $"Execution failed: {rootMessage}");
+
         await LogAsync(botId, bot.ExecutionCount, BotLogLevel.Info,
             "Send a message to provide guidance for the next attempt, or use /stop to stop the bot.");
 
@@ -971,15 +1005,80 @@ public class BotEngine : IBotEngine, IDisposable
         ActionPlanChanged?.Invoke(this, new ActionPlanChangedEventArgs { BotId = botId, Plan = plan });
     }
 
-    private InferenceClient CreateInferenceClient()
+    private BotInferenceSession CreateBotSession(UserSettings settings)
     {
+        if (settings.HostModeEnabled && _localInference is not null)
+            return BotInferenceSession.CreateLocal(_localInference);
+
         var sessionClientFactory = new SessionClientFactory(_keyProvider);
         var sessionManager = new InferenceSessionManager(
             sessionClientFactory,
             _keyProvider,
             _loggerFactory.CreateLogger<InferenceSessionManager>());
         var factory = new InferenceClientFactory(sessionManager);
-        return factory.Create();
+        return BotInferenceSession.CreateOrc(factory.Create());
+    }
+
+    /// <summary>
+    /// Abstracts ORC-based InferenceClient and local ILocalInferenceService
+    /// behind a unified Create/Send/Dispose pattern.
+    /// </summary>
+    private sealed class BotInferenceSession : IAsyncDisposable
+    {
+        private readonly InferenceClient? _orcClient;
+        private readonly ILocalInferenceService? _local;
+        private string? _inferenceId;
+        private string? _sessionId;
+
+        public static BotInferenceSession CreateOrc(InferenceClient client) => new(client, null);
+        public static BotInferenceSession CreateLocal(ILocalInferenceService local) => new(null, local);
+
+        private BotInferenceSession(InferenceClient? orc, ILocalInferenceService? local)
+        {
+            _orcClient = orc;
+            _local = local;
+        }
+
+        public async Task CreateAsync(CreateInferenceRequest request)
+        {
+            if (_local is not null)
+            {
+                var response = await _local.CreateSessionAsync(request);
+                _inferenceId = response.InferenceId;
+                _sessionId = response.SessionId;
+            }
+            else
+            {
+                await _orcClient!.CreateAsync(request);
+            }
+        }
+
+        public async IAsyncEnumerable<SendInferenceResponse> SendAsync(
+            SendInferenceRequest request,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            if (_local is not null)
+            {
+                request.InferenceId = _inferenceId!;
+                request.SessionId = _sessionId!;
+                await foreach (var response in _local.SendAsync(request, ct))
+                    yield return response;
+            }
+            else
+            {
+                var stream = _orcClient!.Send(request);
+                while (await stream.ResponseStream.MoveNext(ct))
+                    yield return stream.ResponseStream.Current;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_local is not null && _inferenceId is not null)
+                try { await _local.CloseSessionAsync(_inferenceId); } catch { }
+            else if (_orcClient is not null)
+                try { await _orcClient.CloseAsync(); } catch { }
+        }
     }
 
     private static string BuildBotPlanningPrompt(BotInstance bot, List<string>? userInstructions = null, List<BotMemoryEntry>? memories = null)
@@ -1141,6 +1240,58 @@ public class BotEngine : IBotEngine, IDisposable
             kvp.Value.Cts.Dispose();
         }
         _runtimes.Clear();
+    }
+
+    /// <summary>
+    /// Unwrap TargetInvocationException and AggregateException to get the real error message.
+    /// </summary>
+    private static string GetRootMessage(Exception ex)
+    {
+        var inner = ex;
+        while (inner is System.Reflection.TargetInvocationException or AggregateException && inner.InnerException is not null)
+            inner = inner.InnerException;
+        return inner.Message;
+    }
+
+    /// <summary>
+    /// Check if the exception (or any inner exception) is a gRPC Unauthenticated (401) error.
+    /// </summary>
+    private static bool IsAuthenticationError(Exception ex)
+    {
+        var current = ex;
+        while (current is not null)
+        {
+            if (current is RpcException rpcEx && rpcEx.StatusCode == Grpc.Core.StatusCode.Unauthenticated)
+                return true;
+            current = current.InnerException;
+        }
+        return false;
+    }
+
+    private static readonly string _diagLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "DaisiHost", "tui-diag.log");
+
+    private static void DiagLog(string message)
+    {
+        try
+        {
+            File.AppendAllText(_diagLogPath,
+                $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    private static string UnwrapException(Exception ex)
+    {
+        var msg = $"{ex.GetType().Name}: {ex.Message}\n  {ex.StackTrace}";
+        var inner = ex.InnerException;
+        while (inner is not null)
+        {
+            msg += $"\n  --- Inner: {inner.GetType().Name}: {inner.Message}\n  {inner.StackTrace}";
+            inner = inner.InnerException;
+        }
+        return msg;
     }
 
     private class BotRuntime(CancellationTokenSource cts, Channel<BotLogEntry> outputChannel)

@@ -43,16 +43,21 @@ public class LocalInferenceService : ILocalInferenceService
 
         try
         {
+            DiagLog("LocalInferenceService.InitializeAsync starting...");
             await _settingsService.LoadAsync();
             await SyncUserModelPathAsync();
             _toolService.LoadTools();
             _toolService.LoadToolsFromAssembly(typeof(DaisiBot.LocalTools.Shell.ShellExecuteTool).Assembly);
+            DiagLog("Tools loaded, loading models...");
             _modelService.LoadModels();
             _initialized = true;
+            var ctxSize = _settingsService.Settings?.Model?.Backend?.ContextSize ?? 0;
+            DiagLog($"Local inference initialized. Models: {_modelService.LocalModels.Count}, Default: {_modelService.Default?.AIModel.Name ?? "none"}, ContextSize: {ctxSize}");
             _logger.LogInformation("Local inference initialized. Models loaded: {Count}", _modelService.LocalModels.Count);
         }
         catch (Exception ex)
         {
+            DiagLog($"InitializeAsync FAILED: {UnwrapException(ex)}");
             _logger.LogError(ex, "Failed to initialize local inference");
         }
     }
@@ -160,7 +165,16 @@ public class LocalInferenceService : ILocalInferenceService
         if (!_initialized)
             await InitializeAsync();
 
-        return await _inferenceService.CreateNewInferenceSessionAsync(request);
+        DiagLog($"CreateSessionAsync: model={request.ModelName}, thinkLevel={request.ThinkLevel}");
+        try
+        {
+            return await _inferenceService.CreateNewInferenceSessionAsync(request);
+        }
+        catch (Exception ex)
+        {
+            DiagLog($"CreateSessionAsync FAILED: {UnwrapException(ex)}");
+            throw;
+        }
     }
 
     public async IAsyncEnumerable<SendInferenceResponse> SendAsync(
@@ -176,5 +190,31 @@ public class LocalInferenceService : ILocalInferenceService
     public async Task CloseSessionAsync(string inferenceId)
     {
         await _inferenceService.CloseInferenceSessionAsync(inferenceId, InferenceCloseReasons.CloseRequestedByClient);
+    }
+
+    private static readonly string DiagLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "DaisiHost", "tui-diag.log");
+
+    private static void DiagLog(string message)
+    {
+        try
+        {
+            File.AppendAllText(DiagLogPath,
+                $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    private static string UnwrapException(Exception ex)
+    {
+        var msg = $"{ex.GetType().Name}: {ex.Message}\n  {ex.StackTrace}";
+        var inner = ex.InnerException;
+        while (inner is not null)
+        {
+            msg += $"\n  --- Inner: {inner.GetType().Name}: {inner.Message}\n  {inner.StackTrace}";
+            inner = inner.InnerException;
+        }
+        return msg;
     }
 }
