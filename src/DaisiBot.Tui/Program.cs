@@ -13,12 +13,22 @@ using DaisiBot.Data;
 using DaisiBot.Tui;
 using DaisiBot.Tui.Dialogs;
 using DaisiBot.Tui.Screens;
+using DaisiBot.Tui.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Velopack;
 
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
+
+VelopackApp.Build()
+    .OnAfterInstallFastCallback(v => VelopackInstallHooks.OnAfterInstall(v))
+    .OnAfterUpdateFastCallback(v => VelopackInstallHooks.OnAfterUpdate(v))
+    .OnBeforeUninstallFastCallback(v => VelopackInstallHooks.OnBeforeUninstall(v))
+    .Run();
+
+VelopackUpdateService.ShowVersionNumber();
 
 // Diagnostic log helper for debugging TUI issues
 var diagLogPath = Path.Combine(
@@ -51,11 +61,15 @@ builder.Services.AddSingleton<ITextInferenceBackend>(sp =>
 {
     DiagLog("Resolving ITextInferenceBackend (LlamaSharp)...");
     var backend = new LlamaSharpTextBackend();
-    // Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
-    backend.ConfigureAsync(new BackendConfiguration
+    var config = new BackendConfiguration
     {
-        LogCallback = (_, _) => { }
-    }).GetAwaiter().GetResult();
+        LogCallback = (_, _) => { } // Suppress native logging — corrupts TUI
+    };
+    // Add app-local runtimes to native library search path (bundled in Velopack package)
+    var appRuntimesPath = Path.Combine(AppContext.BaseDirectory, "runtimes");
+    if (Directory.Exists(appRuntimesPath))
+        config.SearchDirectories.Add(appRuntimesPath);
+    backend.ConfigureAsync(config).GetAwaiter().GetResult();
     DiagLog("LlamaSharp backend configured");
     return backend;
 });
@@ -106,6 +120,7 @@ using (var scope = host.Services.CreateScope())
 
 // Initialize auth
 var authService = host.Services.GetRequiredService<DaisiBotAuthService>();
+authService.BotPlatform = "tui";
 await authService.InitializeAsync();
 #if DEBUG
 {

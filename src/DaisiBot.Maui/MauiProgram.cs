@@ -57,6 +57,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<ChatNavigationState>();
         builder.Services.AddSingleton<BotNavigationState>();
 
+#if WINDOWS
+        builder.Services.AddSingleton<DaisiBot.Maui.Services.VelopackUpdateService>();
+#endif
+
         var app = builder.Build();
 
         // Ensure database created and schema up to date, then apply saved connection settings
@@ -73,7 +77,14 @@ public static class MauiProgram
         }
 
         var authService = app.Services.GetRequiredService<DaisiBotAuthService>();
+        authService.BotPlatform = "maui";
         authService.InitializeAsync().GetAwaiter().GetResult();
+
+#if WINDOWS
+        // Trigger background update check (fire-and-forget)
+        var updateService = app.Services.GetRequiredService<DaisiBot.Maui.Services.VelopackUpdateService>();
+        _ = Task.Run(() => updateService.CheckAndApplyUpdateAsync());
+#endif
 
         return app;
     }
