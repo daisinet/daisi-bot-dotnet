@@ -12,6 +12,88 @@ public static partial class PlanParser
         if (string.IsNullOrWhiteSpace(rawOutput))
             return null;
 
+        // Try numbered list first (preferred for small models)
+        var listPlan = ParseNumberedList(rawOutput);
+        if (listPlan is not null)
+            return listPlan;
+
+        // Fallback to XML (backward compat for larger models)
+        return ParseXml(rawOutput);
+    }
+
+    /// <summary>
+    /// Parse numbered list format:
+    /// Goal: One sentence
+    /// 1. First step
+    /// 2. Second step
+    /// </summary>
+    public static ActionPlan? ParseNumberedList(string rawOutput)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+            return null;
+
+        var lines = rawOutput.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        // Try to extract goal from "Goal: ..." line
+        string? goal = null;
+        foreach (var line in lines)
+        {
+            var goalMatch = GoalLineRegex().Match(line);
+            if (goalMatch.Success)
+            {
+                goal = goalMatch.Groups[1].Value.Trim();
+                break;
+            }
+        }
+
+        var plan = new ActionPlan { Goal = goal ?? string.Empty };
+
+        foreach (var line in lines)
+        {
+            if (plan.Steps.Count >= MaxSteps) break;
+
+            var match = NumberedListRegex().Match(line);
+            if (match.Success)
+            {
+                var desc = match.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    plan.Steps.Add(new ActionItem
+                    {
+                        StepNumber = plan.Steps.Count + 1,
+                        Description = desc
+                    });
+                }
+                continue;
+            }
+
+            var bulletMatch = BulletListRegex().Match(line);
+            if (bulletMatch.Success)
+            {
+                var desc = bulletMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    plan.Steps.Add(new ActionItem
+                    {
+                        StepNumber = plan.Steps.Count + 1,
+                        Description = desc
+                    });
+                }
+            }
+        }
+
+        return plan.Steps.Count > 0 ? plan : null;
+    }
+
+    /// <summary>
+    /// Parse XML format (backward compat):
+    /// &lt;plan&gt;&lt;goal&gt;...&lt;/goal&gt;&lt;step&gt;...&lt;/step&gt;&lt;/plan&gt;
+    /// </summary>
+    public static ActionPlan? ParseXml(string rawOutput)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+            return null;
+
         var planMatch = PlanTagRegex().Match(rawOutput);
         if (!planMatch.Success)
             return null;
@@ -112,4 +194,7 @@ public static partial class PlanParser
 
     [GeneratedRegex(@"^[-\*\u2022]\s*(.+)$", RegexOptions.Compiled)]
     private static partial Regex BulletListRegex();
+
+    [GeneratedRegex(@"^Goal:\s*(.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex GoalLineRegex();
 }

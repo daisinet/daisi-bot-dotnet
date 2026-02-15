@@ -63,6 +63,7 @@ public class BotMainScreen : IScreen
         _botEngine.BotStatusChanged += OnBotStatusChanged;
         _botEngine.ActionPlanChanged += OnActionPlanChanged;
         _botEngine.BotLogEntryAdded += OnBotLogEntryAdded;
+        _botEngine.AuthenticationRequired += OnAuthenticationRequired;
 
         UpdateFocus();
         LoadInitial();
@@ -214,6 +215,20 @@ public class BotMainScreen : IScreen
             if (_currentBot?.Id != entry.BotId) return;
             _outputPanel.AppendLogEntry(entry, skipDraw: !CanDraw);
             if (CanDraw) AnsiConsole.Flush();
+        });
+    }
+
+    private void OnAuthenticationRequired(object? sender, Guid botId)
+    {
+        _app.Post(() =>
+        {
+            // Beep to alert the user
+            try { Console.Beep(); } catch { }
+
+            // Only show login modal if we're the active screen and no modal is already open
+            if (!IsActive || _app.IsModalOpen) return;
+
+            _app.RunModal(new LoginFlow(_app, _services));
         });
     }
 

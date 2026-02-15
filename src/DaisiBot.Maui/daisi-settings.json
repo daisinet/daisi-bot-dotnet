@@ -19,7 +19,7 @@
     "ModelFolderPath": "C:\\repos\\daisinet\\daisi-bot-dotnet\\src\\DaisiBot.Maui\\daisi-gguf-models",
     "Models": [],
     "AutomaticDownloads": true,
-    "LLama": {
+    "backend": {
       "Runtime": 0,
       "ShowLogs": true,
       "AutoFallback": true,

@@ -97,6 +97,8 @@ public class MainScreen : IScreen
             {
                 _app.Post(() =>
                 {
+                    // Only show login modal if this screen is currently active
+                    if (_app.ActiveScreen != this) return;
                     var loginFlow = new LoginFlow(_app, _services);
                     _app.RunModal(loginFlow);
                 });

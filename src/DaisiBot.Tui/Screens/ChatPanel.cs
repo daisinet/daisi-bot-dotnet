@@ -76,6 +76,8 @@ public class ChatPanel
 
     public void Draw()
     {
+        if (Width < 3 || Height < 5) return; // Not yet laid out
+
         // Re-wrap if width changed
         if (Width != _lastWrapWidth && _conversation is not null)
         {

@@ -698,7 +698,7 @@ public class DaisiBotChatService : IChatService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create local inference session");
-            createError = ex.Message;
+            createError = GetRootMessage(ex);
         }
 
         if (createError is not null)
@@ -953,6 +953,17 @@ public class DaisiBotChatService : IChatService
             _loggerFactory.CreateLogger<InferenceSessionManager>());
         var factory = new InferenceClientFactory(sessionManager);
         return factory.Create();
+    }
+
+    /// <summary>
+    /// Unwrap TargetInvocationException and AggregateException to get the real error message.
+    /// </summary>
+    private static string GetRootMessage(Exception ex)
+    {
+        var inner = ex;
+        while (inner is System.Reflection.TargetInvocationException or AggregateException && inner.InnerException is not null)
+            inner = inner.InnerException;
+        return inner.Message;
     }
 
     internal static string FormatConversationHistory(List<ChatMessage> messages, string latestUserMessage)

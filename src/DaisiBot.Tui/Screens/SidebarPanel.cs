@@ -55,6 +55,8 @@ public class SidebarPanel
 
     public void Draw()
     {
+        if (Width < 3 || Height < 3) return; // Not yet laid out
+
         // Title
         var titleBar = " Conversations ";
         SetBorderColor();
