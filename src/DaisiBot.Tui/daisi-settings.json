@@ -9,7 +9,7 @@
     "Name": "DAVID-WORK-PC",
     "MaxConcurrentSessions": 5,
     "SecretKey": "",
-    "OrcIpAddressOrDomain": "orc-dev.daisinet.com",
+    "OrcIpAddressOrDomain": "orc.daisinet.com",
     "OrcPort": 443,
     "AutoUpdate": true,
     "LogLevel": "Information",
