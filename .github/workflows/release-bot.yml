@@ -474,7 +474,7 @@ jobs:
               "AuthorLink": "",
               "Tags": [],
               "BodyMarkdown": "\n".join(body_lines),
-              "ImageUrl": "/images/logo.svg",
+              "ImageUrl": "/images/og-preview.jpg",
               "DateCreated": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
               "LikeCount": 0,
               "ViewCount": 0
