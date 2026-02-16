@@ -6,19 +6,65 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>4c471536-0e35-48a1-97cc-39391e057e8c</UserSecretsId>
+    <Company>Distributed AI Systems Inc</Company>
+    <Authors>Distributed AI Systems Inc</Authors>
+    <Product>Daisi Bot</Product>
+    <Title>Daisi Bot</Title>
+    <PackageProjectUrl>https://daisi.ai</PackageProjectUrl>
+    <Copyright>Copyright 2025 Distributed AI Systems Inc. All Rights Reserved.</Copyright>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <VersionSuffix>$([System.DateTime]::UtcNow.ToString(yyyy.MM.dd.HHmm))</VersionSuffix>
+    <AssemblyVersion Condition=" '$(VersionSuffix)' == '' ">0.0.0.1</AssemblyVersion>
+    <AssemblyVersion Condition=" '$(VersionSuffix)' != '' ">$(VersionSuffix)</AssemblyVersion>
+    <Version Condition=" '$(VersionSuffix)' == '' ">0.0.1.0</Version>
+    <Version Condition=" '$(VersionSuffix)' != '' ">$(VersionSuffix)</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Deterministic>false</Deterministic>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LLamaSharpVersion>0.25.0</LLamaSharpVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.1.25080.5" />
-    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" />
-    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="$(LLamaSharpVersion)" />
+    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="$(LLamaSharpVersion)" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="$(LLamaSharpVersion)" />
+    <PackageReference Include="Velopack" Version="0.*" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DaisiBot.Core\DaisiBot.Core.csproj" />
     <ProjectReference Include="..\DaisiBot.Agent\DaisiBot.Agent.csproj" />
     <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference\Daisi.Inference.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference.LlamaSharp\Daisi.Inference.LlamaSharp.csproj" />
   </ItemGroup>
+
+  <!--
+    dotnet publish -r <rid> flattens native assets from runtimes/<rid>/native/<backend>/ into
+    the publish root. Since LLamaSharp backends (avx, avx2, cuda12, etc.) all share the same
+    file names (llama.dll, ggml.dll, …), only one arbitrary copy survives. LLamaSharp needs
+    the full runtimes/<rid>/native/<backend>/ directory structure to select the right backend
+    at runtime. This target restores that structure in the publish output so Velopack packages
+    include all backend variants.
+  -->
+  <Target Name="PreserveLLamaSharpRuntimes" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <_LLamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.cpu\$(LLamaSharpVersion)\runtimes\$(RuntimeIdentifier)\native\**\*" />
+      <_LLamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.cuda12.windows\$(LLamaSharpVersion)\runtimes\$(RuntimeIdentifier)\native\**\*" />
+      <_LLamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.cuda12.linux\$(LLamaSharpVersion)\runtimes\$(RuntimeIdentifier)\native\**\*" />
+      <_LLamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.vulkan.windows\$(LLamaSharpVersion)\runtimes\$(RuntimeIdentifier)\native\**\*" />
+      <_LLamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.vulkan.linux\$(LLamaSharpVersion)\runtimes\$(RuntimeIdentifier)\native\**\*" />
+    </ItemGroup>
+    <Message Text="Copying LLamaSharp native libraries to publish output: @(_LLamaRuntimes->Count()) files" Importance="high" />
+    <Copy SourceFiles="@(_LLamaRuntimes)"
+          DestinationFiles="@(_LLamaRuntimes->'$(PublishDir)runtimes\$(RuntimeIdentifier)\native\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

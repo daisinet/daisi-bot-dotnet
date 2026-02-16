@@ -1,5 +1,8 @@
 using Daisi.Host.Core.Services;
 using Daisi.Host.Core.Services.Interfaces;
+using Daisi.Inference.Interfaces;
+using Daisi.Inference.LlamaSharp;
+using Daisi.Inference.Models;
 using Daisi.SDK.Models;
 using DaisiBot.Agent.Auth;
 using DaisiBot.Agent.Extensions;
@@ -10,21 +13,66 @@ using DaisiBot.Data;
 using DaisiBot.Tui;
 using DaisiBot.Tui.Dialogs;
 using DaisiBot.Tui.Screens;
+using DaisiBot.Tui.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Velopack;
 
-using LLama.Native;
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
+
+VelopackApp.Build()
+    .OnAfterInstallFastCallback(v => VelopackInstallHooks.OnAfterInstall(v))
+    .OnAfterUpdateFastCallback(v => VelopackInstallHooks.OnAfterUpdate(v))
+    .OnBeforeUninstallFastCallback(v => VelopackInstallHooks.OnBeforeUninstall(v))
+    .Run();
+
+VelopackUpdateService.ShowVersionNumber();
+
+// Diagnostic log helper for debugging TUI issues
+var diagLogPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+    "DaisiHost", "tui-diag.log");
+void DiagLog(string msg)
+{
+    try { File.AppendAllText(diagLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{Environment.NewLine}"); } catch { }
+}
+
+try { File.WriteAllText(diagLogPath, ""); } catch { }
+DiagLog("=== Program.cs starting ===");
+
+// Capture unhandled exceptions for diagnostics
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    DiagLog($"UNHANDLED: {e.ExceptionObject}");
+TaskScheduler.UnobservedTaskException += (_, e) =>
+{
+    DiagLog($"UNOBSERVED TASK: {e.Exception}");
+    e.SetObserved();
+};
 
 var builder = Host.CreateApplicationBuilder(args);
 
 // Suppress all console logging — we own the terminal
 builder.Logging.ClearProviders();
 
-// Suppress LlamaSharp native logging — it writes directly to stdout and corrupts the TUI
-NativeLibraryConfig.All.WithLogCallback((level, message) => { });
+// Register LlamaSharp backend with log suppression
+builder.Services.AddSingleton<ITextInferenceBackend>(sp =>
+{
+    DiagLog("Resolving ITextInferenceBackend (LlamaSharp)...");
+    var backend = new LlamaSharpTextBackend();
+    var config = new BackendConfiguration
+    {
+        LogCallback = (_, _) => { } // Suppress native logging — corrupts TUI
+    };
+    // Add app-local runtimes to native library search path (bundled in Velopack package)
+    var appRuntimesPath = Path.Combine(AppContext.BaseDirectory, "runtimes");
+    if (Directory.Exists(appRuntimesPath))
+        config.SearchDirectories.Add(appRuntimesPath);
+    backend.ConfigureAsync(config).GetAwaiter().GetResult();
+    DiagLog("LlamaSharp backend configured");
+    return backend;
+});
 
 // Configure DAISI network
 DaisiStaticSettings.AutoswapOrc();
@@ -72,6 +120,7 @@ using (var scope = host.Services.CreateScope())
 
 // Initialize auth
 var authService = host.Services.GetRequiredService<DaisiBotAuthService>();
+authService.BotPlatform = "tui";
 await authService.InitializeAsync();
 #if DEBUG
 {
@@ -82,31 +131,45 @@ await authService.InitializeAsync();
 }
 #endif
 
+DiagLog("Services initialized, constructing TUI screens...");
+
 // Run TUI with raw console
 var app = new App(host.Services);
-var chatScreen = new MainScreen(app);
-var botScreen = new BotMainScreen(app);
-var router = new ScreenRouter(app, chatScreen, botScreen);
-chatScreen.ScreenRouter = router;
-botScreen.ScreenRouter = router;
 
-// Restore last screen (default: bots)
-var lastScreen = "bots";
-UserSettings userSettings;
+try
 {
-    var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
-    userSettings = await settingsSvc.GetSettingsAsync();
-    lastScreen = userSettings.LastScreen;
-}
+    var chatScreen = new MainScreen(app);
+    DiagLog("MainScreen created");
+    var botScreen = new BotMainScreen(app);
+    DiagLog("BotMainScreen created");
+    var router = new ScreenRouter(app, chatScreen, botScreen);
+    chatScreen.ScreenRouter = router;
+    botScreen.ScreenRouter = router;
 
-// Schedule model download check for first frame if self-host mode enabled (not localhost or DaisiNet)
-if (userSettings.HostModeEnabled && !userSettings.LocalhostModeEnabled)
-{
-    app.Post(() =>
+    // Restore last screen (default: bots)
+    var lastScreen = "bots";
+    UserSettings userSettings;
     {
-        var dialog = new ModelDownloadDialog(app, host.Services);
-        app.RunModal(dialog);
-    });
-}
+        var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
+        userSettings = await settingsSvc.GetSettingsAsync();
+        lastScreen = userSettings.LastScreen;
+    }
 
-app.Run(router.GetScreen(lastScreen));
+    // Schedule model download check for first frame if self-host mode enabled (not localhost or DaisiNet)
+    if (userSettings.HostModeEnabled && !userSettings.LocalhostModeEnabled)
+    {
+        app.Post(() =>
+        {
+            var dialog = new ModelDownloadDialog(app, host.Services);
+            app.RunModal(dialog);
+        });
+    }
+
+    DiagLog($"Starting event loop on screen: {lastScreen}, hostMode={userSettings.HostModeEnabled}, localhostMode={userSettings.LocalhostModeEnabled}");
+    app.Run(router.GetScreen(lastScreen));
+}
+catch (Exception ex)
+{
+    DiagLog($"FATAL: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+    throw;
+}

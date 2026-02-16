@@ -1,0 +1,356 @@
+name: Release Bot
+
+on:
+  push:
+    tags:
+      - 'beta-*'
+  workflow_dispatch:
+    inputs:
+      timestamp_version:
+        description: 'Timestamp version for assembly/DB (e.g. 2026.02.11.1430). Auto-generated if empty.'
+        required: false
+        type: string
+      version:
+        description: 'Semver for Velopack packaging (e.g. 1.2.3). Auto-incremented from releases.json if empty.'
+        required: false
+        type: string
+      release_group:
+        description: 'Release group / Velopack channel'
+        required: true
+        type: choice
+        options:
+          - beta
+          - group1
+          - group2
+          - production
+      activate:
+        description: 'Activate the release immediately'
+        required: true
+        type: boolean
+        default: true
+      release_notes:
+        description: 'Release notes'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  determine-versions:
+    name: Determine Versions
+    runs-on: ubuntu-latest
+    outputs:
+      timestamp_version: ${{ steps.versions.outputs.TIMESTAMP_VERSION }}
+      semver: ${{ steps.versions.outputs.SEMVER }}
+      channel: ${{ steps.versions.outputs.CHANNEL }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Determine versions
+        id: versions
+        shell: bash
+        run: |
+          # Determine channel
+          if [ "${{ github.event_name }}" = "push" ]; then
+            CHANNEL="beta"
+          else
+            CHANNEL="${{ inputs.release_group }}"
+          fi
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+          # Determine timestamp version
+          INPUT_TS="${{ inputs.timestamp_version }}"
+          if [ -n "$INPUT_TS" ] && [ "$INPUT_TS" != "" ]; then
+            TIMESTAMP_VERSION="$INPUT_TS"
+          else
+            TIMESTAMP_VERSION=$(date -u +"%Y.%m.%d.%H%M")
+          fi
+          echo "TIMESTAMP_VERSION=$TIMESTAMP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Timestamp version: $TIMESTAMP_VERSION"
+
+          # Determine semver — reads from TUI releases.json as the primary source
+          INPUT_SEMVER="${{ inputs.version }}"
+          if [ -n "$INPUT_SEMVER" ] && [ "$INPUT_SEMVER" != "" ]; then
+            SEMVER="$INPUT_SEMVER"
+          else
+            LATEST_SEMVER=""
+            for RID in win-x64 linux-x64 osx-x64; do
+              RELEASES_JSON=$(az storage blob download \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+                --container-name releases \
+                --name "velopack-bot/tui/${CHANNEL}/${RID}/releases.${CHANNEL}.json" \
+                --auth-mode login \
+                --query content -o tsv 2>/dev/null || echo "")
+              if [ -n "$RELEASES_JSON" ]; then
+                VER=$(echo "$RELEASES_JSON" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          versions = [e.get('Version','0.0.0') for e in data if 'Version' in e]
+          if versions:
+              versions.sort(key=lambda v: list(map(int, v.split('.'))))
+              print(versions[-1])
+          else:
+              print('')
+          " 2>/dev/null || echo "")
+                if [ -n "$VER" ] && [ "$VER" != "" ]; then
+                  if [ -z "$LATEST_SEMVER" ] || python3 -c "
+          import sys
+          a=list(map(int,'$VER'.split('.')))
+          b=list(map(int,'$LATEST_SEMVER'.split('.')))
+          sys.exit(0 if a>b else 1)
+          " 2>/dev/null; then
+                    LATEST_SEMVER="$VER"
+                  fi
+                fi
+              fi
+            done
+
+            if [ -n "$LATEST_SEMVER" ]; then
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_SEMVER"
+              PATCH=$((PATCH + 1))
+              SEMVER="${MAJOR}.${MINOR}.${PATCH}"
+            else
+              SEMVER="1.0.0"
+            fi
+          fi
+          echo "SEMVER=$SEMVER" >> "$GITHUB_OUTPUT"
+          echo "Semver: $SEMVER"
+
+  build-and-pack:
+    name: Build & Pack (${{ matrix.app }} ${{ matrix.rid }})
+    needs: determine-versions
+    strategy:
+      matrix:
+        include:
+          - app: tui
+            os: windows-latest
+            rid: win-x64
+            project: DaisiBot.Tui
+            packId: DaisiBotTui
+            mainExe: DaisiBot.Tui.exe
+            framework: net10.0
+          - app: tui
+            os: ubuntu-latest
+            rid: linux-x64
+            project: DaisiBot.Tui
+            packId: DaisiBotTui
+            mainExe: DaisiBot.Tui
+            framework: net10.0
+          - app: tui
+            os: macos-latest
+            rid: osx-x64
+            project: DaisiBot.Tui
+            packId: DaisiBotTui
+            mainExe: DaisiBot.Tui
+            framework: net10.0
+          - app: maui
+            os: windows-latest
+            rid: win-x64
+            project: DaisiBot.Maui
+            packId: DaisiBotMaui
+            mainExe: DaisiBot.Maui.exe
+            framework: net10.0-windows10.0.19041.0
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout daisi-bot-dotnet
+        uses: actions/checkout@v4
+        with:
+          path: daisi-bot-dotnet
+
+      - name: Checkout daisi-sdk-dotnet
+        uses: actions/checkout@v4
+        with:
+          repository: daisinet/daisi-sdk-dotnet
+          token: ${{ secrets.SDK_PAT }}
+          path: daisi-sdk-dotnet
+
+      - name: Checkout daisi-hosts-dotnet
+        uses: actions/checkout@v4
+        with:
+          repository: daisinet/daisi-hosts-dotnet
+          token: ${{ secrets.SDK_PAT }}
+          path: daisi-hosts-dotnet
+
+      - name: Checkout daisi-tools-dotnet
+        uses: actions/checkout@v4
+        with:
+          repository: daisinet/daisi-tools-dotnet
+          token: ${{ secrets.SDK_PAT }}
+          path: daisi-tools-dotnet
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI workload
+        if: matrix.app == 'maui'
+        run: dotnet workload install maui
+
+      - name: Publish
+        run: >
+          dotnet publish daisi-bot-dotnet/src/${{ matrix.project }}
+          -c Release
+          -r ${{ matrix.rid }}
+          -f ${{ matrix.framework }}
+          --self-contained true
+          /p:Version=${{ needs.determine-versions.outputs.semver }}
+          /p:AssemblyVersion=${{ needs.determine-versions.outputs.timestamp_version }}
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
+
+      - name: Velopack Pack
+        shell: bash
+        run: |
+          PUBLISH_DIR="daisi-bot-dotnet/src/${{ matrix.project }}/bin/Release/${{ matrix.framework }}/${{ matrix.rid }}/publish"
+          SEMVER="${{ needs.determine-versions.outputs.semver }}"
+          CHANNEL="${{ needs.determine-versions.outputs.channel }}"
+          SHORTCUTS_FLAG=""
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            SHORTCUTS_FLAG="--shortcuts Desktop,StartMenuRoot"
+          fi
+          vpk pack \
+            --packId ${{ matrix.packId }} \
+            --packVersion $SEMVER \
+            --packDir "$PUBLISH_DIR" \
+            --mainExe "${{ matrix.mainExe }}" \
+            --channel $CHANNEL \
+            --outputDir ./vpk-output \
+            --packTitle "Daisi Bot" \
+            --packAuthors "Distributed AI Systems Inc" \
+            $SHORTCUTS_FLAG
+
+      - name: Upload Velopack artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velopack-${{ matrix.app }}-${{ matrix.rid }}
+          path: ./vpk-output/*
+
+  upload-to-azure:
+    name: Upload to Azure Blob
+    needs: [determine-versions, build-and-pack]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload to Azure Blob Storage
+        shell: bash
+        run: |
+          CHANNEL="${{ needs.determine-versions.outputs.channel }}"
+
+          for ARTIFACT_DIR in artifacts/velopack-*; do
+            # Parse app and rid from artifact name: velopack-{app}-{rid}
+            DIRNAME=$(basename "$ARTIFACT_DIR")
+            APP=$(echo "$DIRNAME" | sed 's/velopack-//' | sed 's/-[^-]*-[^-]*$//')
+            RID=$(echo "$DIRNAME" | sed 's/velopack-[a-z]*-//')
+            echo "Uploading artifacts for $APP/$RID..."
+
+            for FILE in "$ARTIFACT_DIR"/*; do
+              FILENAME=$(basename "$FILE")
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+                --container-name releases \
+                --name "velopack-bot/${APP}/${CHANNEL}/${RID}/${FILENAME}" \
+                --file "$FILE" \
+                --overwrite \
+                --auth-mode login
+            done
+          done
+
+  write-cosmosdb-record:
+    name: Write CosmosDB Record
+    needs: [determine-versions, upload-to-azure]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "ACTIVATE=true" >> "$GITHUB_OUTPUT"
+            echo "NOTES=Auto-release from tag ${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ACTIVATE=${{ inputs.activate }}" >> "$GITHUB_OUTPUT"
+            echo "NOTES=${{ inputs.release_notes }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Write release record
+        shell: bash
+        env:
+          COSMOSDB_ACCOUNT: ${{ secrets.COSMOSDB_ACCOUNT_NAME }}
+          COSMOSDB_DATABASE: ${{ secrets.COSMOSDB_DATABASE_NAME }}
+          STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+          CHANNEL: ${{ needs.determine-versions.outputs.channel }}
+          SEMVER: ${{ needs.determine-versions.outputs.semver }}
+          TIMESTAMP_VERSION: ${{ needs.determine-versions.outputs.timestamp_version }}
+          ACTIVATE: ${{ steps.meta.outputs.ACTIVATE }}
+          NOTES: ${{ steps.meta.outputs.NOTES }}
+        run: |
+          pip install azure-cosmos azure-identity -q
+          python3 << 'PYEOF'
+          import os, datetime, random, string
+          from azure.identity import DefaultAzureCredential
+          from azure.cosmos import CosmosClient
+
+          credential = DefaultAzureCredential()
+          client = CosmosClient(
+              f"https://{os.environ['COSMOSDB_ACCOUNT']}.documents.azure.com:443/",
+              credential
+          )
+          db = client.get_database_client(os.environ['COSMOSDB_DATABASE'])
+          container = db.get_container_client("BotReleases")
+
+          release_id = f"botrel-{datetime.datetime.utcnow().strftime('%y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_lowercase, k=5))}"
+
+          raw_version = os.environ['TIMESTAMP_VERSION']
+          normalized_version = '.'.join(str(int(p)) for p in raw_version.split('.'))
+
+          item = {
+              "id": release_id,
+              "ReleaseGroup": os.environ['CHANNEL'],
+              "Version": normalized_version,
+              "SemVer": os.environ['SEMVER'],
+              "TuiDownloadUrl": f"https://{os.environ['STORAGE_ACCOUNT']}.blob.core.windows.net/releases/velopack-bot/tui/{os.environ['CHANNEL']}",
+              "MauiDownloadUrl": f"https://{os.environ['STORAGE_ACCOUNT']}.blob.core.windows.net/releases/velopack-bot/maui/{os.environ['CHANNEL']}",
+              "IsActive": os.environ['ACTIVATE'].lower() == 'true',
+              "ReleaseNotes": os.environ.get('NOTES', ''),
+              "CreatedBy": "github-actions",
+              "DateCreated": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+          }
+
+          container.create_item(item)
+          print(f"Created bot release record: {release_id}")
+          PYEOF
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Bot ${{ needs.determine-versions.outputs.semver }} (${{ needs.determine-versions.outputs.timestamp_version }})"
+          body: "Auto-release from tag ${{ github.ref_name }}"
+          tag_name: ${{ github.ref_name }}

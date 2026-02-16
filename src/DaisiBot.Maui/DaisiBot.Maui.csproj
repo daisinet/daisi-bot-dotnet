@@ -14,6 +14,21 @@
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
     <WindowsPackageType>None</WindowsPackageType>
+    <Company>Distributed AI Systems Inc</Company>
+    <Authors>Distributed AI Systems Inc</Authors>
+    <Product>Daisi Bot</Product>
+    <PackageProjectUrl>https://daisi.ai</PackageProjectUrl>
+    <Copyright>Copyright 2025 Distributed AI Systems Inc. All Rights Reserved.</Copyright>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <VersionSuffix>$([System.DateTime]::UtcNow.ToString(yyyy.MM.dd.HHmm))</VersionSuffix>
+    <AssemblyVersion Condition=" '$(VersionSuffix)' == '' ">0.0.0.1</AssemblyVersion>
+    <AssemblyVersion Condition=" '$(VersionSuffix)' != '' ">$(VersionSuffix)</AssemblyVersion>
+    <Version Condition=" '$(VersionSuffix)' == '' ">0.0.1.0</Version>
+    <Version Condition=" '$(VersionSuffix)' != '' ">$(VersionSuffix)</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Deterministic>false</Deterministic>
   </PropertyGroup>
     
   <ItemGroup>
@@ -21,6 +36,11 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
     <PackageReference Include="MudBlazor" Version="8.5.0" />
     <PackageReference Include="Markdig" Version="0.40.0" />
+  </ItemGroup>
+
+  <!-- Velopack for Windows desktop auto-update (mobile uses app store distribution) -->
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <PackageReference Include="Velopack" Version="0.*" />
   </ItemGroup>
 
   <!-- Suppress LlamaSharp backend packages entirely — not usable on mobile targets,
@@ -54,6 +74,8 @@
     <ProjectReference Include="..\DaisiBot.Agent\DaisiBot.Agent.csproj" />
     <ProjectReference Include="..\DaisiBot.Data\DaisiBot.Data.csproj" />
     <ProjectReference Include="..\DaisiBot.Shared.UI\DaisiBot.Shared.UI.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference\Daisi.Inference.csproj" />
+    <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference.LlamaSharp\Daisi.Inference.LlamaSharp.csproj" />
   </ItemGroup>
 
 </Project>

@@ -13,4 +13,10 @@ public interface IBotEngine
     event EventHandler<BotInstance>? BotStatusChanged;
     event EventHandler<ActionPlanChangedEventArgs>? ActionPlanChanged;
     event EventHandler<BotLogEntry>? BotLogEntryAdded;
+
+    /// <summary>
+    /// Fired when the ORC returns a 401/Unauthenticated error, indicating
+    /// the user needs to log in again.
+    /// </summary>
+    event EventHandler<Guid>? AuthenticationRequired;
 }
