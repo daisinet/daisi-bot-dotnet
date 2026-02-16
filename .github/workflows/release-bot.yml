@@ -150,13 +150,14 @@ jobs:
             packId: DaisiBotTui
             mainExe: DaisiBot.Tui
             framework: net10.0
-          - app: maui
-            os: windows-latest
-            rid: win-x64
-            project: DaisiBot.Maui
-            packId: DaisiBotMaui
-            mainExe: DaisiBot.Maui.exe
-            framework: net10.0-windows10.0.19041.0
+          # MAUI disabled — .NET 10 Mono runtime package not yet available on NuGet
+          # - app: maui
+          #   os: windows-latest
+          #   rid: win-x64
+          #   project: DaisiBot.Maui
+          #   packId: DaisiBotMaui
+          #   mainExe: DaisiBot.Maui.exe
+          #   framework: net10.0-windows10.0.19041.0
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout daisi-bot-dotnet
