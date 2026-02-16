@@ -348,6 +348,71 @@ jobs:
           print(f"Created bot release record: {release_id}")
           PYEOF
 
+      - name: Create news article
+        if: needs.determine-versions.outputs.channel == 'production'
+        shell: bash
+        env:
+          COSMOSDB_ACCOUNT: ${{ secrets.COSMOSDB_ACCOUNT_NAME }}
+          COSMOSDB_DATABASE: ${{ secrets.COSMOSDB_DATABASE_NAME }}
+          STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+          CHANNEL: ${{ needs.determine-versions.outputs.channel }}
+          SEMVER: ${{ needs.determine-versions.outputs.semver }}
+          TIMESTAMP_VERSION: ${{ needs.determine-versions.outputs.timestamp_version }}
+          NOTES: ${{ steps.meta.outputs.NOTES }}
+        run: |
+          python3 << 'PYEOF'
+          import os, re, datetime
+          from azure.identity import DefaultAzureCredential
+          from azure.cosmos import CosmosClient
+
+          credential = DefaultAzureCredential()
+          client = CosmosClient(
+              f"https://{os.environ['COSMOSDB_ACCOUNT']}.documents.azure.com:443/",
+              credential
+          )
+          db = client.get_database_client(os.environ['COSMOSDB_DATABASE'])
+          container = db.get_container_client("Blogs")
+
+          semver = os.environ['SEMVER']
+          version = os.environ['TIMESTAMP_VERSION']
+          channel = os.environ['CHANNEL']
+          notes = os.environ.get('NOTES', '')
+          storage = os.environ['STORAGE_ACCOUNT']
+
+          title = f"DAISI Bot v{semver} Released"
+          blog_id = re.sub(r'[^a-zA-Z0-9 ]', '', title).replace(' ', '_')
+          download_url = f"https://{storage}.blob.core.windows.net/releases/velopack-bot/tui/{channel}/win-x64/DaisiBotTui-{channel}-Setup.exe"
+
+          body_lines = [
+              f"**DAISI Bot v{semver}** (build {version}) is now available.",
+              "",
+          ]
+          if notes:
+              body_lines += ["## Release Notes", "", notes, ""]
+          body_lines += [
+              "## Download",
+              "",
+              f"[Download DAISI Bot TUI for Windows]({download_url})",
+          ]
+
+          item = {
+              "id": blog_id,
+              "BlogId": blog_id,
+              "Title": title,
+              "Author": "Daisi Devs",
+              "AuthorLink": "",
+              "Tags": [],
+              "BodyMarkdown": "\n".join(body_lines),
+              "ImageUrl": "/images/logo.svg",
+              "DateCreated": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+              "LikeCount": 0,
+              "ViewCount": 0
+          }
+
+          container.upsert_item(item)
+          print(f"Created news article: {blog_id}")
+          PYEOF
+
       - name: Create GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
