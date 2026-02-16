@@ -1,6 +1,6 @@
 # DaisiBot .NET
 
-A multi-platform AI chatbot client for the [DAISI](https://daisinet.com) decentralized inference network. DaisiBot provides two interfaces — a terminal UI and a native desktop/mobile app — both powered by a shared service layer that streams responses from DAISI-hosted language models.
+A multi-platform AI chatbot client for the [DAISI](https://daisi.ai) decentralized inference network. DaisiBot provides two interfaces — a terminal UI and a native desktop/mobile app — both powered by a shared service layer that streams responses from DAISI-hosted language models.
 
 ## Architecture
 
