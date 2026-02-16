@@ -242,7 +242,7 @@ All client apps (TUI, MAUI) store data locally in SQLite at:
 - **Windows**: `%LocalAppData%\DaisiBot\daisibot.db`
 - **macOS/Linux**: `~/.local/share/DaisiBot/daisibot.db`
 
-Skill marketplace features have been migrated to the [DAISI Manager](https://manager.daisinet.com) and the [DAISI public website](https://daisinet.com/learn/daisibotmastery).
+Skill marketplace features have been migrated to the [DAISI Manager](https://manager.daisinet.com) and the [DAISI public website](https://daisi.ai/learn/daisibotmastery).
 
 ## License
 
