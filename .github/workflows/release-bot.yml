@@ -293,6 +293,31 @@ jobs:
             echo "NOTES=${{ inputs.release_notes }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout for changelog
+        if: needs.determine-versions.outputs.channel == 'production'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gather changelog
+        if: needs.determine-versions.outputs.channel == 'production'
+        id: changelog
+        shell: bash
+        run: |
+          # Get non-merge commits introduced since the previous merge to main
+          # (i.e. everything in the latest dev→main PR)
+          if git rev-parse HEAD^1 >/dev/null 2>&1; then
+            LOG=$(git log --no-merges --pretty=format:"%s" HEAD^1..HEAD 2>/dev/null || true)
+          fi
+          # Fallback: if HEAD isn't a merge or no commits found, get recent history
+          if [ -z "$LOG" ]; then
+            LOG=$(git log --no-merges --pretty=format:"%s" -30)
+          fi
+          # Write to file (multiline env vars are tricky)
+          echo "$LOG" > /tmp/changelog.txt
+          echo "Changelog:"
+          echo "$LOG"
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -361,7 +386,8 @@ jobs:
           NOTES: ${{ steps.meta.outputs.NOTES }}
         run: |
           python3 << 'PYEOF'
-          import os, re, datetime
+          import os, re, pathlib
+          from datetime import datetime, timezone
           from azure.identity import DefaultAzureCredential
           from azure.cosmos import CosmosClient
 
@@ -379,16 +405,61 @@ jobs:
           notes = os.environ.get('NOTES', '')
           storage = os.environ['STORAGE_ACCOUNT']
 
-          title = f"DAISI Bot v{semver} Released"
+          title = f"DAISI Bot v{version} Released"
           blog_id = re.sub(r'[^a-zA-Z0-9 ]', '', title).replace(' ', '_')
           download_url = f"https://{storage}.blob.core.windows.net/releases/velopack-bot/tui/{channel}/win-x64/DaisiBotTui-{channel}-Setup.exe"
 
+          # Read commit log produced by the Gather changelog step
+          changelog_path = pathlib.Path("/tmp/changelog.txt")
+          commits = []
+          if changelog_path.exists():
+              commits = [l.strip() for l in changelog_path.read_text().splitlines() if l.strip()]
+
+          # Categorise commits by conventional-ish prefixes
+          features, fixes, other = [], [], []
+          for msg in commits:
+              lower = msg.lower()
+              if lower.startswith(("add ", "feat", "implement", "introduce", "new ")):
+                  features.append(msg)
+              elif lower.startswith(("fix", "bug", "patch", "correct", "resolve")):
+                  fixes.append(msg)
+              else:
+                  other.append(msg)
+
+          # Build summary sentence
+          parts = []
+          if features:
+              parts.append(f"{len(features)} new feature{'s' if len(features)!=1 else ''}")
+          if fixes:
+              parts.append(f"{len(fixes)} bug fix{'es' if len(fixes)!=1 else ''}")
+          if other:
+              parts.append(f"{len(other)} other change{'s' if len(other)!=1 else ''}")
+          summary = ", ".join(parts) if parts else "maintenance updates"
+
           body_lines = [
-              f"**DAISI Bot v{semver}** (build {version}) is now available.",
+              f"**DAISI Bot v{version}** (semver {semver}) is now available "
+              f"with {summary}.",
               "",
           ]
+
           if notes:
               body_lines += ["## Release Notes", "", notes, ""]
+
+          if commits:
+              body_lines += ["## Changes", ""]
+              if features:
+                  body_lines += ["### New Features", ""]
+                  body_lines += [f"- {m}" for m in features]
+                  body_lines += [""]
+              if fixes:
+                  body_lines += ["### Bug Fixes", ""]
+                  body_lines += [f"- {m}" for m in fixes]
+                  body_lines += [""]
+              if other:
+                  body_lines += ["### Other", ""]
+                  body_lines += [f"- {m}" for m in other]
+                  body_lines += [""]
+
           body_lines += [
               "## Download",
               "",
@@ -404,13 +475,14 @@ jobs:
               "Tags": [],
               "BodyMarkdown": "\n".join(body_lines),
               "ImageUrl": "/images/logo.svg",
-              "DateCreated": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+              "DateCreated": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
               "LikeCount": 0,
               "ViewCount": 0
           }
 
           container.upsert_item(item)
           print(f"Created news article: {blog_id}")
+          print(f"  {len(commits)} commit(s): {summary}")
           PYEOF
 
       - name: Create GitHub Release
