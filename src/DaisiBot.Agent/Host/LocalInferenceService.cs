@@ -61,8 +61,7 @@ public class LocalInferenceService : ILocalInferenceService
             DiagLog("Tools loaded, loading models...");
             _modelService.LoadModels();
             _initialized = true;
-            var ctxSize = _settingsService.Settings?.Model?.Backend?.ContextSize ?? 0;
-            DiagLog($"Local inference initialized. Models: {_modelService.LocalModels.Count}, Default: {_modelService.Default?.AIModel.Name ?? "none"}, ContextSize: {ctxSize}");
+            DiagLog($"Local inference initialized. Models: {_modelService.LocalModels.Count}, Default: {_modelService.Default?.AIModel.Name ?? "none"}");
             _logger.LogInformation("Local inference initialized. Models loaded: {Count}", _modelService.LocalModels.Count);
         }
         catch (Exception ex)
