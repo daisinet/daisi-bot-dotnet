@@ -132,16 +132,14 @@ public class LocalInferenceService : ILocalInferenceService
             {
                 bool needsDownload = !existingFiles.Contains(m.FileName);
 
-                // Validate existing files — treat corrupt files as missing
+                // Validate existing files — log warning but do not delete or re-download
                 if (!needsDownload)
                 {
                     var filePath = Path.Combine(modelPath, m.FileName);
                     var error = LocalModel.ValidateGgufFile(filePath);
                     if (error is not null)
                     {
-                        _logger.LogWarning("Model '{Name}' is invalid ({Error}) — flagging for re-download", m.Name, error);
-                        try { File.Delete(filePath); } catch { /* best effort */ }
-                        needsDownload = true;
+                        _logger.LogWarning("Model '{Name}' failed validation ({Error}) — file kept on disk, skipping re-download", m.Name, error);
                     }
                 }
 
