@@ -20,6 +20,9 @@
     <ProjectReference Include="..\..\src\DaisiBot.Agent\DaisiBot.Agent.csproj" />
     <ProjectReference Include="..\..\src\DaisiBot.Core\DaisiBot.Core.csproj" />
     <ProjectReference Include="..\..\..\daisi-llogos\src\Daisi.Llogos\Daisi.Llogos.csproj" />
+    <ProjectReference Include="..\..\..\daisi-llogos\src\Daisi.Llogos.Cpu\Daisi.Llogos.Cpu.csproj" />
+    <ProjectReference Include="..\..\..\daisi-llogos\src\Daisi.Llogos.Cuda\Daisi.Llogos.Cuda.csproj" />
+    <ProjectReference Include="..\..\..\daisi-llogos\src\Daisi.Llogos.Vulkan\Daisi.Llogos.Vulkan.csproj" />
   </ItemGroup>
 
   <ItemGroup>
