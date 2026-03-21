@@ -32,6 +32,12 @@ public sealed class InProcessMinionRunner : IAsyncDisposable
     /// <summary>Protocol messages sent by this minion (status, complete, blocked, etc.).</summary>
     public Channel<ProtocolMessage> Outbox { get; } = Channel.CreateUnbounded<ProtocolMessage>();
 
+    /// <summary>Max tokens per generation pass.</summary>
+    public int MaxTokensPerTurn { get; init; } = 4096;
+
+    /// <summary>Max agentic loop iterations.</summary>
+    public int MaxIterations { get; init; } = 20;
+
     public InProcessMinionRunner(
         string id, string role, string goal,
         DaisiLlogosChatSession session,
@@ -69,7 +75,7 @@ public sealed class InProcessMinionRunner : IAsyncDisposable
 
             var parameters = new GenerationParams
             {
-                MaxTokens = 4096,
+                MaxTokens = MaxTokensPerTurn,
                 Temperature = 0.7f,
                 TopP = 0.9f,
                 RepetitionPenalty = 1.1f
@@ -77,7 +83,7 @@ public sealed class InProcessMinionRunner : IAsyncDisposable
 
             // Main agentic loop
             int iteration = 0;
-            const int maxIterations = 20;
+            int maxIterations = MaxIterations;
 
             while (!ct.IsCancellationRequested && iteration < maxIterations)
             {
