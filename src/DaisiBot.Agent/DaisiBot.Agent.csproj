@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="DaisiBot.Agent.Tests" />
   </ItemGroup>
 
@@ -17,10 +21,15 @@
     <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.Inference.LlamaSharp\Daisi.Inference.LlamaSharp.csproj" />
     <ProjectReference Include="..\..\..\daisi-sdk-dotnet\Daisi.SDK\Daisi.SDK.csproj" />
     <ProjectReference Include="..\..\..\daisi-hosts-dotnet\Daisi.Host.Core\Daisi.Host.Core.csproj" />
+    <ProjectReference Include="..\..\..\daisi-llogos\src\Daisi.Llogos\Daisi.Llogos.csproj" />
     <ProjectReference Include="..\DaisiBot.LocalTools\DaisiBot.LocalTools.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="All" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" />
     <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" />
     <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.25.0" />
@@ -28,7 +37,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Protobuf Include="Protos\minion_inference.proto" GrpcServices="Both" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="daisi-skills\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Personas\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

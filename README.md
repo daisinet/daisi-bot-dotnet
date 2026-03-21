@@ -58,6 +58,15 @@ Service implementations that integrate with the DAISI SDK via gRPC:
 
 DI registration is handled by `AddDaisiBotAgent()` extension method.
 
+**Multi-Minion System** (`Minion/`):
+- Two modes: **distributed** (default, in-process with shared model weights) and **centralized** (gRPC server with spawned processes)
+- **Distributed mode**: `DistributedMinionManager` creates in-process `InProcessMinionRunner` tasks that share a `DaisiLlogosModelHandle`. Each minion gets its own `DaisiLlogosChatSession` (KV cache + forward pass) while sharing model weights. `GpuInferenceGate` (SemaphoreSlim) serializes GPU access.
+- **Centralized mode**: `MinionInferenceServer` (Kestrel/gRPC) + `MinionProcessManager` (spawned headless processes) + `MinionSessionManager` (GPU-serialized request queue)
+- `MinionVramBudget` calculates how many concurrent minion sessions fit in free VRAM based on model config (KV cache + DeltaNet state + scratch buffers per session)
+- `MinionProtocol` defines structured JSON messaging (status, blocked, complete, failed, question, answer, file_claim, handoff, directive)
+- `TaskBoard` provides atomic task creation, claiming, and completion for multi-minion coordination
+- See [docs/minions/](docs/minions/) for user-facing documentation
+
 ### DaisiBot.Data
 
 SQLite database layer using EF Core. Database location: `%LocalAppData%\DaisiBot\daisibot.db`.
@@ -128,10 +137,14 @@ Row H-1:     Status bar (F1:Bots F2:Chats F3:Model F4:Settings F5:Login F6:Skill
 **Slash Command System**:
 - `SlashCommandPopup` — Inline autocomplete popup above the input line, showing top 5 matching commands as user types after `/`. Up/Down to navigate, Tab/Enter to complete. Commands without parameters auto-execute on selection.
 - `SlashCommandDispatcher` — Routes commands to handlers. Context-aware: `CurrentBot`/`CurrentConversation` set on selection change.
-- **Commands**: `/help`, `/new`, `/status`, `/kill`, `/runnow`, `/clear`, `/model`, `/settings`, `/skills`, `/export`, `/install <skill>`, `/login`, `/balance`
+- **Commands**: `/help`, `/new`, `/status`, `/kill`, `/runnow`, `/clear`, `/model`, `/settings`, `/skills`, `/export`, `/install <skill>`, `/login`, `/balance`, `/summon`, `/unsummon`, `/spawn`, `/minions`
 - `/kill` — Context-aware, shows confirmation dialog, stops and deletes the bot
 - `/runnow` — Runs the selected bot immediately without affecting its schedule
 - `/status` — Shows detailed status of the selected bot or all bots
+- `/summon` — Activate multi-minion team mode (distributed by default, `--centralized` for gRPC mode)
+- `/unsummon` — Deactivate team mode, stop all minions, free VRAM
+- `/spawn <role> <goal>` — Create a worker minion with a specific role and task
+- `/minions` — List all spawned minions and their status
 
 **Dialogs**: `LoginFlow`, `ModelPickerFlow`, `SettingsFlow`, `SkillBrowserFlow`, `BotCreationFlow`, `ModelDownloadDialog`, `HelpModal`, `ConfirmDialog` — all modal, async operations run on thread pool and post results back via `App.Post()`
 
