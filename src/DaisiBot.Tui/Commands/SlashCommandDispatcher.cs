@@ -25,6 +25,9 @@ public class SlashCommandDispatcher
     /// <summary>Callback invoked after a bot has been updated via /update.</summary>
     public Action? OnBotUpdated { get; set; }
 
+    /// <summary>The summon handler, shared across contexts so /unsummon can find the server.</summary>
+    public SummonCommandHandler? SummonHandler { get; private set; }
+
     public SlashCommandDispatcher(App app, IServiceProvider services, string context)
     {
         _handlers["help"] = new HelpCommandHandler(app).HandleAsync;
@@ -42,6 +45,13 @@ public class SlashCommandDispatcher
         _handlers["export"] = new ExportCommandHandler(services, context).HandleAsync;
         _handlers["status"] = new StatusCommandHandler(services, this).HandleAsync;
         _handlers["runnow"] = new RunNowCommandHandler(services, this).HandleAsync;
+
+        // Summoner commands (available in all contexts)
+        SummonHandler = new SummonCommandHandler(app, services);
+        _handlers["summon"] = SummonHandler.HandleSummonAsync;
+        _handlers["unsummon"] = SummonHandler.HandleUnsummonAsync;
+        _handlers["spawn"] = new SpawnCommandHandler(this).HandleAsync;
+        _handlers["minions"] = new MinionsCommandHandler(this).HandleAsync;
 
         if (context == "bot")
         {

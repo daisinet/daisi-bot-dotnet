@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package daisi.minion.v1;
+
+option csharp_namespace = "DaisiBot.Agent.Minion.Protos";
+
+service MinionInference {
+    rpc CreateSession(CreateMinionSessionRequest) returns (CreateMinionSessionResponse);
+    rpc Chat(MinionChatRequest) returns (stream MinionTokenResponse);
+    rpc AddToolResult(MinionAddToolResultRequest) returns (MinionEmpty);
+    rpc Resume(MinionResumeRequest) returns (stream MinionTokenResponse);
+    rpc GetContextUsage(MinionSessionRequest) returns (MinionContextUsageResponse);
+    rpc CloseSession(MinionSessionRequest) returns (MinionEmpty);
+    rpc SendMessage(MinionSendMessageRequest) returns (MinionEmpty);
+    rpc ReadMessages(MinionSessionRequest) returns (MinionMessagesResponse);
+}
+
+message CreateMinionSessionRequest {
+    string model_name = 1;
+    string system_prompt = 2;
+    string role = 3;
+    string goal = 4;
+    string minion_id = 5;
+}
+
+message CreateMinionSessionResponse {
+    string session_id = 1;
+    int32 context_size = 2;
+}
+
+message MinionChatRequest {
+    string session_id = 1;
+    string content = 2;
+    float temperature = 3;
+    float top_p = 4;
+    int32 max_tokens = 5;
+}
+
+message MinionTokenResponse {
+    string session_id = 1;
+    string content = 2;
+    string type = 3;
+    bool is_complete = 4;
+    int32 tokens_used = 5;
+    int32 tokens_total = 6;
+}
+
+message MinionAddToolResultRequest {
+    string session_id = 1;
+    string tool_name = 2;
+    string result = 3;
+}
+
+message MinionResumeRequest {
+    string session_id = 1;
+    float temperature = 2;
+    float top_p = 3;
+    int32 max_tokens = 4;
+}
+
+message MinionSessionRequest {
+    string session_id = 1;
+}
+
+message MinionContextUsageResponse {
+    string session_id = 1;
+    int32 tokens_used = 2;
+    int32 tokens_total = 3;
+    float usage_percent = 4;
+}
+
+message MinionEmpty {}
+
+message MinionSendMessageRequest {
+    string session_id = 1;
+    string from_minion_id = 2;
+    string to_minion_id = 3;
+    string content = 4;
+}
+
+message MinionMessagesResponse {
+    repeated MinionMessage messages = 1;
+}
+
+message MinionMessage {
+    string from_minion_id = 1;
+    string content = 2;
+    string timestamp = 3;
+}

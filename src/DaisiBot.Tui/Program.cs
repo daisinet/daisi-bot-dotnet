@@ -7,6 +7,7 @@ using Daisi.SDK.Models;
 using DaisiBot.Agent.Auth;
 using DaisiBot.Agent.Extensions;
 using DaisiBot.Agent.Host;
+using DaisiBot.Agent.Minion;
 using DaisiBot.Core.Interfaces;
 using DaisiBot.Core.Models;
 using DaisiBot.Data;
@@ -21,6 +22,37 @@ using Microsoft.Extensions.Logging;
 using Velopack;
 
 using HostSettingsService = Daisi.Host.Core.Services.Interfaces.ISettingsService;
+
+// Parse minion CLI arguments
+string? serverAddress = null;
+bool headless = false;
+string minionRole = "coder";
+string? minionGoal = null;
+string minionId = $"minion-{Guid.NewGuid():N}"[..16];
+
+for (int i = 0; i < args.Length; i++)
+{
+    switch (args[i])
+    {
+        case "--server" when i + 1 < args.Length:
+            serverAddress = args[++i];
+            if (!serverAddress.StartsWith("http://") && !serverAddress.StartsWith("https://"))
+                serverAddress = $"http://{serverAddress}";
+            break;
+        case "--headless":
+            headless = true;
+            break;
+        case "--role" when i + 1 < args.Length:
+            minionRole = args[++i];
+            break;
+        case "--goal" when i + 1 < args.Length:
+            minionGoal = args[++i];
+            break;
+        case "--id" when i + 1 < args.Length:
+            minionId = args[++i];
+            break;
+    }
+}
 
 VelopackApp.Build()
     .OnAfterInstallFastCallback(v => VelopackInstallHooks.OnAfterInstall(v))
@@ -85,13 +117,32 @@ builder.Services.AddDbContextFactory<DaisiBotDbContext>(options =>
 // Agent services
 builder.Services.AddDaisiBotAgent();
 
-// Host mode services (local inference)
-builder.Services.AddSingleton<HostSettingsService, DesktopSettingsService>();
-builder.Services.AddSingleton<ModelService>();
-builder.Services.AddSingleton<SkillSyncService>();
-builder.Services.AddSingleton<InferenceService>();
-builder.Services.AddSingleton<ToolService>();
-builder.Services.AddSingleton<ILocalInferenceService, LocalInferenceService>();
+// Host mode services (local inference) or remote minion inference
+if (serverAddress is not null)
+{
+    // Remote minion mode: connect to summoner's gRPC server
+    var remote = new RemoteInferenceService(
+        serverAddress, minionId, minionRole, minionGoal ?? "",
+        LoggerFactory.Create(b => { }).CreateLogger<RemoteInferenceService>());
+    builder.Services.AddSingleton<ILocalInferenceService>(remote);
+    builder.Services.AddSingleton(remote);
+
+    // Still need host services for tool loading
+    builder.Services.AddSingleton<HostSettingsService, DesktopSettingsService>();
+    builder.Services.AddSingleton<ModelService>();
+    builder.Services.AddSingleton<SkillSyncService>();
+    builder.Services.AddSingleton<InferenceService>();
+    builder.Services.AddSingleton<ToolService>();
+}
+else
+{
+    builder.Services.AddSingleton<HostSettingsService, DesktopSettingsService>();
+    builder.Services.AddSingleton<ModelService>();
+    builder.Services.AddSingleton<SkillSyncService>();
+    builder.Services.AddSingleton<InferenceService>();
+    builder.Services.AddSingleton<ToolService>();
+    builder.Services.AddSingleton<ILocalInferenceService, LocalInferenceService>();
+}
 
 builder.Services.AddHttpClient();
 
@@ -131,9 +182,78 @@ await authService.InitializeAsync();
 }
 #endif
 
-DiagLog("Services initialized, constructing TUI screens...");
+// Initialize remote inference if in minion mode
+if (serverAddress is not null)
+{
+    var remote = host.Services.GetRequiredService<RemoteInferenceService>();
+    await remote.InitializeAsync();
+    DiagLog($"Remote inference connected to {serverAddress}");
+}
+
+DiagLog("Services initialized");
+
+// Headless mode: run a goal autonomously without TUI
+if (headless && minionGoal is not null)
+{
+    DiagLog($"Headless mode: role={minionRole}, goal={minionGoal}");
+    var outputDir = Path.Combine(Directory.GetCurrentDirectory(), ".minion", minionId);
+    Directory.CreateDirectory(outputDir);
+    var outputPath = Path.Combine(outputDir, "output.log");
+
+    var chatService = host.Services.GetRequiredService<IChatService>();
+    var settingsSvc = host.Services.GetRequiredService<DaisiBot.Core.Interfaces.ISettingsService>();
+    var settings = await settingsSvc.GetSettingsAsync();
+    var conversationStore = host.Services.GetRequiredService<IConversationStore>();
+
+    // Build system prompt with protocol instructions
+    var protocolPrompt = MinionProtocol.GetMinionProtocolPrompt(minionId, minionRole);
+    var systemPrompt = $"You are a {minionRole}. Your goal: {minionGoal}\n\n{protocolPrompt}";
+
+    var conversation = new Conversation
+    {
+        ModelName = settings.DefaultModelName,
+        ThinkLevel = settings.DefaultThinkLevel,
+        SystemPrompt = systemPrompt
+    };
+    await conversationStore.CreateAsync(conversation);
+
+    var config = new AgentConfig
+    {
+        ModelName = settings.DefaultModelName,
+        ThinkLevel = settings.DefaultThinkLevel,
+        Temperature = settings.Temperature,
+        TopP = settings.TopP,
+        MaxTokens = settings.MaxTokens,
+        UseHostMode = true // Use local/remote inference
+    };
+
+    await File.WriteAllTextAsync(outputPath, $"[{DateTime.Now:O}] Minion {minionId} starting: {minionGoal}\n");
+
+    try
+    {
+        await foreach (var chunk in chatService.SendMessageAsync(conversation.Id, minionGoal, config))
+        {
+            if (chunk.Type == "Text" || chunk.Type == "InferenceResponseTypesText")
+            {
+                await File.AppendAllTextAsync(outputPath, chunk.Content);
+            }
+        }
+        await File.AppendAllTextAsync(outputPath, $"\n[{DateTime.Now:O}] Complete\n");
+
+        // Write status file
+        await File.WriteAllTextAsync(Path.Combine(outputDir, "status"), "complete");
+    }
+    catch (Exception ex)
+    {
+        await File.AppendAllTextAsync(outputPath, $"\n[{DateTime.Now:O}] Error: {ex.Message}\n");
+        await File.WriteAllTextAsync(Path.Combine(outputDir, "status"), "failed");
+    }
+
+    return;
+}
 
 // Run TUI with raw console
+DiagLog("Constructing TUI screens...");
 var app = new App(host.Services);
 
 try
